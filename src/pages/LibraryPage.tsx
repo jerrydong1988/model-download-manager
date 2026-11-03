@@ -402,8 +402,8 @@ export default function LibraryPage() {
   const showEmptyFilter = filterActive && filteredTree.matchedCount === 0 && files.length > 0
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col gap-3 px-6 py-3">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      <div className="workspace-inset flex min-h-0 flex-1 flex-col gap-5 py-5">
         {status === 'error' ? (
           <ErrorBanner
             title="扫描本地模型库失败"
@@ -413,7 +413,7 @@ export default function LibraryPage() {
         ) : null}
 
         {/* 统计卡：统一 4 张（总占用 / 模型权重 / 投影器与矩阵 / 配置与其他） */}
-        <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="summary-strip shrink-0">
           <StatCard
             label="总占用空间"
             value={formatBytes(totals.totalSize)}
@@ -463,7 +463,7 @@ export default function LibraryPage() {
         />
 
         {/* 目录树面板 */}
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface">
+        <section className="flex min-h-[300px] flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface md:min-h-[180px]">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2">
             <div className="relative w-60 max-w-full">
               <Search

@@ -14,7 +14,7 @@ import type {
 } from '../types'
 import { defaultRevisionFor } from '../lib/format'
 
-export const MOCK_APP_VERSION = '0.2.0'
+export const MOCK_APP_VERSION = '0.2.1'
 export const MOCK_DATA_DIR = 'C:\\DemoAppData\\com.modeldownload.manager'
 export const MOCK_DEFAULT_DOWNLOAD_DIR = 'C:\\Models'
 /** v0.2.0：多扫描根验收用的附加根目录（仅 ?mock=1&multiroot=1 时写入 settings.libraryRoots）。 */

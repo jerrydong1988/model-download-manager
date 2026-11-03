@@ -124,7 +124,7 @@ export function RevisionSelector({
       >
         <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
         <span className="text-fg-muted">revision</span>
-        <span className="font-mono">{current}</span>
+        <span className="max-w-[180px] truncate font-mono" title={current}>{current}</span>
         <ChevronDown className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
       </button>
 
@@ -132,7 +132,7 @@ export function RevisionSelector({
         <div
           role="dialog"
           aria-label="选择 revision"
-          className="absolute left-0 top-full z-dropdown mt-1 max-h-[22rem] w-80 overflow-y-auto rounded-card border border-line bg-surface p-2 shadow-overlay animate-fade-in"
+          className="glass-overlay absolute left-0 top-full z-dropdown mt-1 max-h-[22rem] w-72 max-w-[calc(100vw-112px)] overflow-y-auto rounded-card p-2 shadow-overlay animate-fade-in"
         >
           <div className="mb-1 flex items-center justify-between gap-2 px-1.5 pb-1 text-meta text-fg-muted">
             <span>

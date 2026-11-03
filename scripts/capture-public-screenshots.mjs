@@ -27,7 +27,7 @@ try {
   await client.send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.setInterval = () => 0;' })
   const load = async (page, extra = '', theme = 'light') => {
     await client.navigate(`${BASE.origin}/?mock=1&capture=${Date.now()}-${++navigationIndex}${extra}#/${page}`)
-    await client.waitFor("document.body.innerText.includes('Mock') && document.body.innerText.includes('v0.2.0')", { timeoutMs: 30000 })
+    await client.waitFor("document.body.innerText.includes('演示数据') && document.body.innerText.includes('v0.2.1')", { timeoutMs: 30000 })
     await client.evaluate(`(async () => {
       if (window.__TAURI_INTERNALS__) throw new Error('Native application capture is forbidden');
       const ipc = await import('/src/lib/ipc.ts');
@@ -42,7 +42,7 @@ try {
     if (/[A-Za-z]:[\\/]+Users[\\/]+/i.test(visible) || /\b(?:hf_[A-Za-z0-9]{25,}|gh[pousr]_[A-Za-z0-9]{30,})\b/.test(visible)) {
       throw new Error(`Private path or credential in ${name}`)
     }
-    if (!visible.includes('Mock')) throw new Error(`Missing demo indicator in ${name}`)
+    if (!visible.includes('演示数据')) throw new Error(`Missing demo indicator in ${name}`)
     const info = await client.screenshot(join(OUT, `${name}.png`))
     records.push({ file: `${name}.png`, bytes: info.bytes, mock: true })
     console.log(`captured ${name}`)

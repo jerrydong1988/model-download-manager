@@ -8,7 +8,7 @@ import {
 import { EmptyState } from '../ui/EmptyState'
 import { FileQuestion } from 'lucide-react'
 
-const ROW_HEIGHT = 40
+const ROW_HEIGHT = 48
 const OVERSCAN = 10
 
 export interface FileTableProps {
@@ -70,7 +70,8 @@ export function FileTable({
   const visibleFiles = files.slice(start, end)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-auto">
+      <div className="flex min-h-0 min-w-[600px] flex-1 flex-col">
       <FileTableHeader
         allSelected={allSelected}
         someSelected={someSelected}
@@ -111,6 +112,7 @@ export function FileTable({
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -329,7 +329,7 @@ async function runPageChecks(client) {
 
   // 事件通道（前端 listen 订阅是否成功建立）
   try {
-    await client.waitFor('document.body.innerText.includes("事件通道已连接")', {
+    await client.waitFor('document.body.innerText.includes("状态已同步")', {
       timeoutMs: 15000,
       description: '事件通道已连接',
     })
@@ -581,7 +581,7 @@ async function main() {
   try {
     const target = await launchApp()
     state.client = await connectApp(target)
-    results.record('应用以真实模式启动（非 mock）', !(await state.client.evaluate('document.body.innerText.includes("Mock 数据模式")')), '')
+    results.record('应用以真实模式启动（非 mock）', !(await state.client.evaluate('document.body.innerText.includes("演示数据")')), '')
 
     if (CHECKS.has('pages')) {
       await runPageChecks(state.client)

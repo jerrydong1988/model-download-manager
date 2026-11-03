@@ -242,7 +242,7 @@ async function main() {
     const snapshot = await client.tauriInvoke('get_snapshot')
     results.record('生产模式（内嵌前端，非 dev server）', /tauri\.localhost|tauri:\/\//.test(origin), origin)
     results.record('已安装版本号', snapshot.appVersion === EXPECTED_VERSION, `appVersion=${snapshot.appVersion}（期望 ${EXPECTED_VERSION}）`)
-    results.record('非 mock 模式', !(await client.evaluate('document.body.innerText.includes("Mock 数据模式")')), '')
+    results.record('非 mock 模式', !(await client.evaluate('document.body.innerText.includes("演示数据")')), '')
     results.record(
       '已安装 exe 与 NSIS 安装目录一致',
       process.execPath ? true : true,

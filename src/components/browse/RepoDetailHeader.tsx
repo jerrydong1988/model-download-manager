@@ -4,7 +4,6 @@ import {
   ChevronDown,
   Download,
   Heart,
-  PackageOpen,
   ShieldAlert,
 } from 'lucide-react'
 import type { RepoDetail, RepoFile, Source } from '../../types'
@@ -36,6 +35,14 @@ export function RepoDetailHeader({ detail, source, revisionSelector }: RepoDetai
 
   return (
     <div className="flex flex-col gap-3">
+      <div>
+        <h2 className="break-all text-page text-fg">{detail.id}</h2>
+        <p className="mt-1 text-secondary text-fg-secondary">
+          共 {detail.files.length} 个文件 · 权重 {weightCount}
+          {mmprojCount > 0 ? ` · 投影器 ${mmprojCount}` : ''}
+          {' · '}{formatBytes(detail.totalSize)}
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <SourceBadge source={source} />
         {revisionSelector}
@@ -48,20 +55,12 @@ export function RepoDetailHeader({ detail, source, revisionSelector }: RepoDetai
           <Badge tone="emerald">公开仓库</Badge>
         )}
         {detail.license ? <Badge tone="violet">{detail.license}</Badge> : null}
-        <Badge tone="slate">revision: {detail.revision}</Badge>
+        {!revisionSelector ? <Badge tone="slate">revision: {detail.revision}</Badge> : null}
       </div>
 
-      <div>
-        <h2 className="break-all text-page text-fg">{detail.id}</h2>
-        <p className="mt-1 text-meta text-fg-secondary">
-          <span className="font-medium text-fg-secondary">{SOURCE_LABEL[source]}</span>
-          <span className="mx-1.5 text-fg-disabled">/</span>
-          共 {detail.files.length} 个文件 · 权重 {weightCount}
-          {mmprojCount > 0 ? ` · 投影器 ${mmprojCount}` : ''}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-meta text-fg-secondary">
+      <details className="text-meta text-fg-secondary">
+        <summary className="w-fit cursor-pointer rounded-control text-fg-muted hover:text-primary">仓库信息</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
         <span className="inline-flex items-center gap-1.5">
           <Download className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
           下载{' '}
@@ -72,11 +71,6 @@ export function RepoDetailHeader({ detail, source, revisionSelector }: RepoDetai
           点赞{' '}
           <span className="font-medium tabular-nums text-fg">{formatCount(detail.likes)}</span>
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <PackageOpen className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
-          总大小{' '}
-          <span className="font-medium tabular-nums text-fg">{formatBytes(detail.totalSize)}</span>
-        </span>
         {detail.lastModified ? (
           <span className="inline-flex items-center gap-1.5">
             <CalendarDays className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
@@ -86,14 +80,15 @@ export function RepoDetailHeader({ detail, source, revisionSelector }: RepoDetai
       </div>
 
       {detail.tags.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-2">
           {detail.tags.slice(0, 8).map((tag) => (
-            <Badge key={tag} tone="slate">
+            <span key={tag} className="text-meta text-fg-muted">
               {tag}
-            </Badge>
+            </span>
           ))}
         </div>
       ) : null}
+      </details>
 
       {gated ? (
         <p className="flex items-start gap-1.5 rounded-control border border-amber-200 bg-amber-50 px-3 py-2 text-meta leading-5 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
@@ -118,9 +113,9 @@ export interface FileRowProps {
   onToggle: (path: string) => void
 }
 
-/** 文件表表头（与行使用同一套 grid 列宽；表头 12px/600，行高 40）。 */
+/** 表头和文件行共享列宽；文件行 48px，与虚拟列表的计算一致。 */
 export const FILE_GRID =
-  'grid grid-cols-[34px_minmax(0,1fr)_68px_88px_96px] items-center gap-3'
+  'grid grid-cols-[24px_minmax(0,1fr)_68px_88px_96px] items-center gap-3'
 
 export function FileTableHeader({
   allSelected,
@@ -171,8 +166,8 @@ export function FileTableRow({ file, selected, state, onToggle }: FileRowProps) 
     <div
       className={cx(
         FILE_GRID,
-        'group h-10 border-b border-line px-4 transition-colors duration-micro last:border-b-0',
-        disabled ? 'bg-surface-2/40' : 'hover:bg-surface-2',
+        'group h-12 border-b border-line px-4 transition-colors duration-micro last:border-b-0',
+        disabled ? 'bg-surface-2/40' : checked ? 'bg-primary-soft' : 'hover:bg-surface-2',
       )}
     >
       <input

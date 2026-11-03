@@ -319,7 +319,7 @@ export default function DownloadsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="page-container space-y-3 pb-8">
+      <div className="page-container space-y-6 pb-8">
         {snapshotStatus === 'error' ? (
           <ErrorBanner
             title="无法加载下载任务"
@@ -328,8 +328,8 @@ export default function DownloadsPage() {
           />
         ) : null}
 
-        {/* 汇总指标（保持 4 张） */}
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {/* 连续汇总栏 */}
+        <div className="summary-strip">
           <StatCard
             label="进行中"
             value={counts.running}

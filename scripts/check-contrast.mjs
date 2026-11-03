@@ -10,45 +10,33 @@
  * 退出码：0 = 全部通过；1 = 存在失败配对。
  */
 
+import { readFileSync } from 'node:fs'
+
+// Read the shipping palette so a theme change cannot silently keep testing old colors.
+const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+const TOKEN_NAMES = {
+  bg: 'bg', surface: 'surface', surface2: 'surface-2', surface3: 'surface-3',
+  fg: 'fg', fgSecondary: 'fg-secondary', fgMuted: 'fg-muted', fgDisabled: 'fg-disabled',
+  primary: 'primary', primaryHover: 'primary-hover', onPrimary: 'on-primary',
+  danger: 'danger', success: 'success', warning: 'warning', ring: 'ring',
+  borderStrong: 'border-strong', scrollbar: 'fg-muted',
+}
+
+function readPalette(selector) {
+  const block = css.match(new RegExp(`${selector}\\s*\\{([^}]+)\\}`))?.[1]
+  if (!block) throw new Error(`Missing theme selector: ${selector}`)
+  return Object.fromEntries(Object.entries(TOKEN_NAMES).map(([name, variable]) => {
+    const raw = block.match(new RegExp(`--color-${variable}:\\s*(\\d+\\s+\\d+\\s+\\d+)\\s*;`))?.[1]
+    if (!raw) throw new Error(`Missing RGB token --color-${variable} in ${selector}`)
+    const rgb = raw.trim().split(/\s+/).map(Number)
+    if (rgb.length !== 3 || rgb.some((value) => !Number.isFinite(value) || value < 0 || value > 255)) throw new Error(`Invalid RGB token: ${variable}`)
+    return [name, `#${rgb.map((value) => value.toString(16).padStart(2, '0')).join('')}`]
+  }))
+}
+
 const TOKENS = {
-  light: {
-    bg: '#f8fafc',
-    surface: '#ffffff',
-    surface2: '#f1f5f9',
-    surface3: '#e2e8f0',
-    fg: '#0f172a',
-    fgSecondary: '#475569',
-    fgMuted: '#64748b',
-    fgDisabled: '#94a3b8',
-    primary: '#2563eb',
-    primaryHover: '#1d4ed8',
-    onPrimary: '#ffffff',
-    danger: '#dc2626',
-    success: '#047857',
-    warning: '#b45309',
-    ring: '#2563eb',
-    borderStrong: '#64748b',
-    scrollbar: '#64748b',
-  },
-  dark: {
-    bg: '#0b1220',
-    surface: '#0f172a',
-    surface2: '#1e293b',
-    surface3: '#334155',
-    fg: '#e2e8f0',
-    fgSecondary: '#cbd5e1',
-    fgMuted: '#94a3b8',
-    fgDisabled: '#64748b',
-    primary: '#3b82f6',
-    primaryHover: '#60a5fa',
-    onPrimary: '#0f172a',
-    danger: '#f87171',
-    success: '#34d399',
-    warning: '#fbbf24',
-    ring: '#60a5fa',
-    borderStrong: '#94a3b8',
-    scrollbar: '#94a3b8',
-  },
+  light: readPalette(':root'),
+  dark: readPalette("\\[data-theme='dark'\\]"),
 }
 
 const MIN_TEXT = 4.5

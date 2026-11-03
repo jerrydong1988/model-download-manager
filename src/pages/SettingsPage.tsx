@@ -145,17 +145,17 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-card border border-line bg-surface">
-      <header className="flex items-start gap-3 border-b border-line px-4 py-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-surface-2 text-primary">
+    <section className="settings-section grid gap-5 xl:grid-cols-[210px_minmax(0,1fr)] xl:gap-10">
+      <header className="flex items-start gap-3">
+        <div className="pt-1 text-fg-muted">
           <Icon className="h-4 w-4" aria-hidden="true" />
         </div>
         <div className="min-w-0">
           <h2 className="text-section text-fg">{title}</h2>
-          <p className="mt-0.5 text-meta leading-4 text-fg-secondary">{description}</p>
+          <p className="mt-2 text-meta leading-5 text-fg-muted">{description}</p>
         </div>
       </header>
-      <div className="space-y-3 px-4 py-3">{children}</div>
+      <div className="min-w-0 space-y-5">{children}</div>
     </section>
   )
 }
@@ -174,7 +174,7 @@ function ToggleRow({
   ariaLabel: string
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-control border border-line bg-surface-2/60 px-3 py-2.5">
+    <div className="flex items-start justify-between gap-4 border-t border-line pt-4">
       <div className="min-w-0">
         <p className="text-body font-medium text-fg">{title}</p>
         <p className="mt-0.5 text-meta leading-4 text-fg-secondary">{description}</p>
@@ -480,8 +480,9 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="page-container max-w-[1120px] space-y-3 pb-8">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="page-container max-w-[1120px] space-y-6 pb-8">
         {error ? (
           <ErrorBanner
             title="保存设置失败"
@@ -518,8 +519,8 @@ export default function SettingsPage() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
-          <div className="space-y-3">
+        <div>
+          <div>
             {/* 外观（v0.1.3 新增分组） */}
             <Section
               title="外观"
@@ -740,7 +741,7 @@ export default function SettingsPage() {
             </Section>
           </div>
 
-          <div className="space-y-3">
+          <div>
             {/* 访问凭据 */}
             <Section
               title="访问凭据"
@@ -900,7 +901,7 @@ export default function SettingsPage() {
                 />
               </Field>
 
-              <div className="rounded-control border border-line p-3">
+              <div className="border-t border-line pt-4">
                 <p className="text-body font-medium text-fg">连接测试</p>
                 <p className="mt-0.5 text-meta leading-4 text-fg-secondary">
                   使用已保存的设置发起真实请求；如刚修改端点，请先保存再测试。
@@ -911,7 +912,7 @@ export default function SettingsPage() {
                     return (
                       <div
                         key={source}
-                        className="rounded-control border border-line bg-surface-2/60 p-2.5"
+                        className="rounded-control bg-surface-2 p-3"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-meta font-medium text-fg-secondary">
@@ -952,8 +953,10 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 内联保存区（替代 sticky 底部条，避免遮挡最后一组设置；P1-7） */}
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3">
+        </div>
+      </div>
+        {/* 保存区占独立布局空间，始终可见且不覆盖字段。 */}
+        <section className="workspace-inset flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface py-4">
           <div className="flex items-center gap-2">
             <span
               className={cx('h-1.5 w-1.5 rounded-full', dirty ? 'bg-warning' : 'bg-success')}
@@ -989,7 +992,6 @@ export default function SettingsPage() {
             </Button>
           </div>
         </section>
-      </div>
     </div>
   )
 }

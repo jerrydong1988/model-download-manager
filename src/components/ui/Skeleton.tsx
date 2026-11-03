@@ -38,18 +38,12 @@ export function SkeletonRegion({
 /** 搜索卡片骨架（浏览页）。 */
 export function RepoCardSkeleton() {
   return (
-    <div className="rounded-card border border-line bg-surface p-4">
+    <div className="bg-surface px-3 py-5">
       <div className="flex items-center gap-2.5">
-        <Skeleton className="h-9 w-9" />
         <div className="flex-1 space-y-2">
           <Skeleton className="h-3.5 w-2/3" />
           <Skeleton className="h-3 w-1/3" />
         </div>
-      </div>
-      <div className="mt-4 flex gap-2">
-        <Skeleton className="h-6 w-16" />
-        <Skeleton className="h-6 w-14" />
-        <Skeleton className="h-6 w-20" />
       </div>
     </div>
   )

@@ -11,22 +11,19 @@ import { cx } from '../../lib/cx'
 
 const KIND_META: Record<
   ToastKind,
-  { icon: typeof CheckCircle2; iconClass: string; accent: string }
+  { icon: typeof CheckCircle2; iconClass: string }
 > = {
   success: {
     icon: CheckCircle2,
     iconClass: 'text-success',
-    accent: 'border-l-2 border-l-success',
   },
   error: {
     icon: AlertCircle,
     iconClass: 'text-danger',
-    accent: 'border-l-2 border-l-danger',
   },
   info: {
     icon: Info,
     iconClass: 'text-primary',
-    accent: 'border-l-2 border-l-primary',
   },
 }
 
@@ -45,8 +42,7 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     <div
       role={toast.kind === 'error' ? 'alert' : 'status'}
       className={cx(
-        'pointer-events-auto flex w-80 items-start gap-2.5 rounded-control border border-line bg-surface p-3 shadow-toast animate-slide-up',
-        meta.accent,
+        'glass-overlay pointer-events-auto flex w-80 max-w-[calc(100vw-32px)] items-start gap-2.5 rounded-card p-4 shadow-toast animate-slide-up',
       )}
     >
       <Icon className={cx('mt-0.5 h-4 w-4 shrink-0', meta.iconClass)} aria-hidden="true" />

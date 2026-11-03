@@ -331,7 +331,7 @@ async function connectApp(appTarget) {
     { timeoutMs: 30000, description: 'Tauri 应用 shell 就绪' },
   )
   await waitForSnapshot(client, (snapshot) => Boolean(snapshot?.settings?.downloadDir), { timeoutMs: 30000 })
-  const isMock = await client.evaluate('document.body.innerText.includes("Mock 数据模式")')
+  const isMock = await client.evaluate('document.body.innerText.includes("演示数据")')
   results.record('应用以真实模式启动（非 mock）', !isMock, isMock ? '检测到 Mock 数据模式' : '真实 IPC')
   const snapshot = await client.tauriInvoke('get_snapshot')
   results.record('get_snapshot 命令可用', Boolean(snapshot?.tasks), `appVersion=${snapshot?.appVersion} dataDir=${snapshot?.dataDir}`)

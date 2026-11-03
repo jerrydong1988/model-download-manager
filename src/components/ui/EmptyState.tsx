@@ -37,9 +37,9 @@ export function EmptyState({
         <Icon className={compact ? 'h-5 w-5' : 'h-7 w-7'} aria-hidden="true" />
       </div>
       <div className="space-y-1">
-        <p className={cx('font-medium text-fg', compact ? 'text-body' : 'text-section')}>
+        <h3 className={cx('font-medium text-fg', compact ? 'text-body' : 'text-section')}>
           {title}
-        </p>
+        </h3>
         {description ? (
           <p className="mx-auto max-w-md text-secondary leading-6 text-fg-secondary">
             {description}

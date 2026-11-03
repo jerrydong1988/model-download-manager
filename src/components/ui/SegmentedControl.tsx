@@ -18,6 +18,7 @@ export interface SegmentedControlProps<T extends string> {
   ariaLabel: string
   size?: 'sm' | 'md'
   className?: string
+  variant?: 'segmented' | 'tabs'
 }
 
 /**
@@ -31,6 +32,7 @@ export function SegmentedControl<T extends string>({
   ariaLabel,
   size = 'md',
   className,
+  variant = 'segmented',
 }: SegmentedControlProps<T>) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([])
 
@@ -62,7 +64,8 @@ export function SegmentedControl<T extends string>({
       role="group"
       aria-label={ariaLabel}
       className={cx(
-        'inline-flex shrink-0 items-center gap-0.5 rounded-control border border-line bg-surface-2 p-0.5',
+        'inline-flex max-w-full flex-wrap items-center gap-1 rounded-control',
+        variant === 'tabs' ? 'bg-transparent' : 'bg-surface-2 p-1',
         className,
       )}
     >
@@ -82,10 +85,10 @@ export function SegmentedControl<T extends string>({
             onClick={() => onChange(option.value)}
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={cx(
-              'inline-flex cursor-pointer items-center gap-1.5 rounded-[4px] border font-medium transition-colors duration-micro',
-              size === 'sm' ? 'h-sm px-2.5 text-meta' : 'h-md px-3 text-meta',
+              'inline-flex cursor-pointer items-center gap-1.5 rounded-md border font-medium transition-colors duration-micro',
+              variant === 'tabs' ? 'h-10 px-4 text-body' : size === 'sm' ? 'h-sm px-2.5 text-meta' : 'h-md px-3 text-meta',
               active
-                ? 'border-line bg-surface text-fg'
+                ? variant === 'tabs' ? 'border-transparent bg-primary-soft text-primary' : 'border-transparent bg-surface text-primary'
                 : 'border-transparent text-fg-secondary hover:bg-surface/60 hover:text-fg',
             )}
           >

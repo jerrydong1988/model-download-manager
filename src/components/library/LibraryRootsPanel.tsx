@@ -51,16 +51,16 @@ export function LibraryRootsPanel({
   onOpen,
   onRescan,
 }: LibraryRootsPanelProps) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const totalFiles = roots.reduce((sum, root) => sum + root.fileCount, 0)
   const totalSize = roots.reduce((sum, root) => sum + root.totalSize, 0)
 
   return (
     <section
-      className="shrink-0 rounded-card border border-line bg-surface"
+      className="shrink-0 bg-surface"
       aria-label="扫描根目录"
     >
-      <header className="flex flex-wrap items-center gap-2 px-3 py-2">
+      <header className="flex flex-wrap items-center gap-2 py-2">
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
@@ -79,7 +79,7 @@ export function LibraryRootsPanel({
         <span className="text-meta text-fg-muted">
           {roots.length} 个根 · {totalFiles} 个文件 · {formatBytes(totalSize)}
         </span>
-        <span className="hidden text-meta text-fg-muted lg:inline">
+        <span className="hidden text-meta text-fg-muted 2xl:inline">
           下载目录固定包含，可添加其他模型目录（最多 8 个附加根）
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -107,21 +107,16 @@ export function LibraryRootsPanel({
       {expanded ? (
         <div
           id="library-roots-body"
-          className="grid gap-2 border-t border-line px-3 py-2 md:grid-cols-2 xl:grid-cols-3"
+          className="max-h-40 divide-y divide-line overflow-y-auto border-b border-line"
         >
           {roots.map((root) => (
             <div
               key={root.rootDir.toLowerCase()}
               role="group"
               aria-label={`扫描根 ${root.rootDir}`}
-              className={cx(
-                'flex min-w-0 flex-col gap-1.5 rounded-control border p-2.5',
-                root.isDownloadDir
-                  ? 'border-primary/30 bg-primary-soft/40'
-                  : 'border-line bg-surface-2/60',
-              )}
+              className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 py-3"
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 flex-1 basis-52 items-center gap-2">
                 <FolderOpen
                   className={cx(
                     'h-4 w-4 shrink-0',
@@ -134,11 +129,11 @@ export function LibraryRootsPanel({
                   {root.isDownloadDir ? '下载目录' : '模型目录'}
                 </Badge>
               </div>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-meta text-fg-secondary">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-fg-secondary">
                 <span className="tabular-nums">
                   {root.fileCount} 个文件 · {formatBytes(root.totalSize)}
                 </span>
-                <span className="text-fg-muted">
+                <span className="hidden text-fg-muted xl:inline">
                   {root.latest > 0
                     ? `最近写入 ${formatRelativeTime(root.latest)}`
                     : '暂无文件'}

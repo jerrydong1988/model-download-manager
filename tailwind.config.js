@@ -7,11 +7,11 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          '"Noto Sans SC Variable"',
           '"Segoe UI Variable Text"',
           '"Segoe UI"',
           '"Microsoft YaHei UI"',
           '"Microsoft YaHei"',
+          '"Noto Sans SC Variable"',
           '"PingFang SC"',
           'system-ui',
           'sans-serif',
@@ -68,8 +68,8 @@ export default {
         meta: ['12px', { lineHeight: '16px' }],
         secondary: ['13px', { lineHeight: '20px' }],
         body: ['14px', { lineHeight: '21px' }],
-        section: ['15px', { lineHeight: '22px', fontWeight: '600' }],
-        page: ['20px', { lineHeight: '28px', letterSpacing: '-0.01em', fontWeight: '600' }],
+        section: ['18px', { lineHeight: '26px', fontWeight: '600' }],
+        page: ['26px', { lineHeight: '34px', letterSpacing: '-0.025em', fontWeight: '600' }],
         metric: ['24px', { lineHeight: '30px', fontWeight: '600' }],
       },
       height: {
@@ -91,8 +91,8 @@ export default {
         10: '40px',
       },
       borderRadius: {
-        control: '6px',
-        card: '10px',
+        control: '8px',
+        card: '14px',
         overlay: '14px',
       },
       boxShadow: {

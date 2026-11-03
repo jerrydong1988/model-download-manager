@@ -286,11 +286,11 @@ interface RevisionList {
    - `206`：解析 `Content-Range`，要求 `start == resumeFrom`，`total` 以 Content-Range 的 `*/total` 为准（覆盖列表中的 size）；不匹配则视为远端已变：删除 part 从头再来一次（最多 1 次）。
    - **`200` 且带 `Content-Range`**（ModelScope 实测：`HTTP 200 + Content-Range: bytes 100-199/659 + Content-Length: 100`）：若 `start == resumeFrom` 且 total 合理 → 按续传成功处理（继续 append），不要截断。
    - `200` 无 `Content-Range`：服务器不支持 Range/远端已变 → 截断 part 从头写。
-   - `416`：若 `Content-Range: bytes */N` 且 `N == resumeFrom`，说明已完整，走完成流程；否则删除 part 重试一次。
+   - `416`：远端大小相同不能证明旧 `.part` 已填满数据；删除旧单流 part，重新获取响应体（最多一次）。
    - `401/403`：不可重试，提示检查 Token/授权。
    - `404`：不可重试，提示文件不存在。
    - `429/5xx`/网络错误：按 `maxRetries` 指数退避重试（1s, 2s, 4s… 上限 30s）。
-4. 续传校验本次传输最新 etag/lastModified（包括重试前已获取的响应）并发送 If-Range；不一致则从头下载。缺失或损坏的元数据不视为可信断点，清理后重下。
+4. 续传校验本次传输最新 etag/lastModified（包括重试前已获取的响应）并发送 If-Range；不一致则从头下载。缺失或损坏的元数据不视为可信断点，清理后重下。旧单流 part 达到完整长度时也从头重取，以覆盖 v0.2.0 预分配后崩溃留下的空洞；分段断点以有效 chunks 为准。
 5. 流式写入：`tokio::fs::File` + `AsyncWriteExt`，每写一块调用限速器。
 
 ### 5.3 并发与限速

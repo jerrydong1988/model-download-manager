@@ -4,7 +4,7 @@
 //! - 中途断开 → Range 续传，最终内容与源一致；
 //! - ModelScope 语义：`200 + Content-Range` 也按续传处理；
 //! - HF 镜像语义：请求带 Range 但返回 200 全量 → 从头写，不写坏文件；
-//! - 416 且 total == part 长度 → 直接完成；
+//! - 416 且 total == 旧 part 长度 → 重取响应体，不信任预分配长度；
 //! - 5xx → 重试次数用尽后 error（重试次数正确）；
 //! - 401 → 不重试；
 //! - 暂停 → `.part` 保留，resume 后内容完整。
@@ -385,14 +385,17 @@ async fn falls_back_to_full_download_when_server_ignores_range() {
 }
 
 #[tokio::test]
-async fn treats_416_with_matching_total_as_complete() {
+async fn does_not_trust_416_for_legacy_full_length_part() {
     let dir = unique_dir("416");
     seed_legacy_meta(&dir, 0);
     let full = content();
     // part 已完整但任务 total 未知（列表中 size=0），因此仍会发 Range 请求。
-    std::fs::write(dir.join("model.safetensors.part"), &full).unwrap();
+    std::fs::write(dir.join("model.safetensors.part"), vec![0; TOTAL]).unwrap();
 
     let (base, counter) = spawn_mock_server(move |_index, request| {
+        if request.range_start.is_none() {
+            return MockResponse::ok(content());
+        }
         assert_eq!(request.range_start, Some(TOTAL as u64));
         MockResponse::new(416, "Range Not Satisfiable", Vec::new())
             .header("Content-Range", &format!("bytes */{TOTAL}"))
@@ -406,15 +409,13 @@ async fn treats_416_with_matching_total_as_complete() {
         0,
         0,
     );
-    let outcome = run_transfer(ctx)
-        .await
-        .expect("416 且 total==part 长度应视为完成");
+    let outcome = run_transfer(ctx).await.expect("416 后应重取完整响应体");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
     ));
     assert_eq!(read_final(&dir), full);
-    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1468,4 +1469,46 @@ fn audit_revision_layout_does_not_collide_with_repo_subdirectory() {
         main.final_path, dev.final_path,
         "main:dev/model.bin and dev:model.bin resolve to one file"
     );
+}
+
+#[tokio::test]
+async fn legacy_sidecar_does_not_certify_preallocated_full_length_data() {
+    for connections in [1, 4] {
+        let (url, _) = spawn_mock_server(|_, request| range_response(&content(), request)).await;
+        let dir = unique_dir("legacy-preallocated-sidecar");
+        seed_legacy_meta(&dir, TOTAL as u64);
+        let mut damaged = vec![0; TOTAL];
+        damaged[..250].copy_from_slice(&content()[..250]);
+        std::fs::write(dir.join("model.safetensors.part"), damaged).unwrap();
+        let ctx = build_auto_context(
+            &dir,
+            url,
+            TaskControl::new(),
+            TOTAL as u64,
+            connections,
+            Some(250),
+            0,
+        );
+        let result = transfer_auto(ctx, &NoopSink).await.unwrap();
+        assert!(matches!(result, TransferOutcome::Completed { .. }));
+        assert_eq!(
+            read_final(&dir),
+            content(),
+            "connections={connections}: full length alone must never certify data"
+        );
+    }
+}
+
+#[tokio::test]
+async fn oversized_partial_response_is_never_published() {
+    let (url, _) = spawn_mock_server(|_, _| {
+        MockResponse::new(206, "Partial Content", vec![1; TOTAL + 10])
+            .header("Content-Range", &format!("bytes 0-{}/{TOTAL}", TOTAL - 1))
+    })
+    .await;
+    let dir = unique_dir("oversized-response");
+    let ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 0);
+    let save = ctx.save_path.clone();
+    assert!(transfer(ctx, &NoopSink).await.is_err());
+    assert!(!save.exists());
 }

@@ -424,8 +424,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const normalized = withDefaultRevision(task)
     snapshotJournal?.push({ kind: 'tasks', tasks: [normalized] })
     const previous = get().tasks
-    const transitions = collectTransitions(previous, [normalized])
-    set((state) => ({ tasks: mergeTaskLists(state.tasks, [normalized]) }))
+    const merged = mergeTaskLists(previous, [normalized])
+    const transitions = collectTransitions(previous, merged)
+    set({ tasks: merged })
     notifyTransitions(transitions)
   },
 
@@ -433,8 +434,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const normalized = tasks.map(withDefaultRevision)
     snapshotJournal?.push({ kind: 'tasks', tasks: normalized })
     const previous = get().tasks
-    const transitions = collectTransitions(previous, normalized)
-    set((state) => ({ tasks: mergeTaskLists(state.tasks, normalized) }))
+    const merged = mergeTaskLists(previous, normalized)
+    const transitions = collectTransitions(previous, merged)
+    set({ tasks: merged })
     notifyTransitions(transitions)
   },
 

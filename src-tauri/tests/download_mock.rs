@@ -1203,8 +1203,12 @@ async fn audit_segmented_rejects_changed_etag_between_ranges() {
         bytes.contains(&17) && bytes.contains(&34)
     };
     assert!(
-        !(matches!(result, Ok(TransferOutcome::Completed { .. })) && mixed),
-        "marked a file containing v1 and v2 blocks completed: {result:?}"
+        result.is_err(),
+        "a changed ETag must stop segmented transfer: {result:?}"
+    );
+    assert!(
+        !mixed && !save.exists(),
+        "a mixed-version final file must never be published"
     );
 }
 

@@ -29,6 +29,8 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b'[')
     .add(b']');
 
+const REVISION_SEGMENT: &AsciiSet = &PATH_SEGMENT.add(b'/');
+
 /// 将仓库内路径按 `/` 分段做百分号转义（保留分隔符）。
 pub fn encode_path(path: &str) -> String {
     path.split('/')
@@ -39,7 +41,7 @@ pub fn encode_path(path: &str) -> String {
 
 /// A revision is one route parameter, even when its name contains '/'.
 pub fn encode_revision(revision: &str) -> String {
-    utf8_percent_encode(revision, &PATH_SEGMENT.add(b'/')).to_string()
+    utf8_percent_encode(revision, REVISION_SEGMENT).to_string()
 }
 
 /// 当前设置下某数据源的端点（已去除尾部 `/`）。

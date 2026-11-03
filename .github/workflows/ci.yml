@@ -2,7 +2,7 @@ name: Windows CI and Release
 
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: windows-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   windows:
@@ -32,6 +32,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: npm ci
       - name: Validate release version
         run: node scripts/check-release.mjs

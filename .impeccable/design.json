@@ -607,7 +607,58 @@
         "name": "xl",
         "value": "1280px"
       }
-    ]
+    ],
+    "icons": {
+      "source": "src/components/icons/catalog.json",
+      "wrapper": "src/components/icons/createIcon.tsx",
+      "generatedEntry": "src/components/icons/index.ts",
+      "inventory": {
+        "total": 70,
+        "project": {
+          "count": 12,
+          "license": "MIT"
+        },
+        "lucide": {
+          "count": 58,
+          "version": "0.453.0",
+          "license": "ISC"
+        }
+      },
+      "geometry": {
+        "viewBox": "0 0 24 24",
+        "defaultStrokeWidth": 1.75,
+        "strokeLinecap": "round",
+        "strokeLinejoin": "round"
+      },
+      "sidebar": {
+        "brand": "BrandMark",
+        "brandSize": "28px",
+        "brandStrokeWidth": 1.8,
+        "brandTile": "40px",
+        "navigationSize": "18px",
+        "navigationStrokeWidth": 1.75
+      },
+      "theme": {
+        "inline": "currentColor",
+        "externalLight": "assets/icons/ui/",
+        "externalDark": "assets/icons/ui-dark/",
+        "externalDarkStroke": "#f2f2f5",
+        "application": "固定蓝紫底与白色图形"
+      },
+      "accessibility": "装饰图标默认 aria-hidden；有 aria-label 或 aria-labelledby 的独立图标默认 role=img；按钮自身保留名称，状态保留可见中文文字；SVG 属性和 ref 转发。",
+      "statusIcons": {
+        "queued": "Clock",
+        "active": "CircleArrowDown",
+        "pausing": "Clock",
+        "paused": "CirclePause",
+        "completed": "CheckCircle2",
+        "error": "AlertCircle",
+        "cancelled": "CircleX"
+      },
+      "nativeTray": "src-tauri/icons/tray-icon.png",
+      "provenance": "PNG 内嵌来源、源 SVG SHA-256 与授权；ICO 使用同名 JSON 来源记录。",
+      "documentation": "assets/icons/README.md"
+    }
   },
   "components": [
     {
@@ -670,9 +721,9 @@
       "name": "Sidebar Navigation",
       "kind": "nav",
       "refersTo": "nav-item",
-      "description": "Sidebar.tsx 的玻璃底与活动项；内联图标来自 Lucide v0.453.0（ISC）。",
-      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><button type=\"button\" class=\"ds-nav-item\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/><circle cx=\"12\" cy=\"12\" r=\"10\"/></svg><span>浏览仓库</span></button><button type=\"button\" class=\"ds-nav-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"7 10 12 15 17 10\"/><line x1=\"12\" x2=\"12\" y1=\"15\" y2=\"3\"/></svg><span>下载队列</span></button></nav>",
-      "css": ".ds-nav{width:176px;padding:16px;background:rgb(var(--color-surface, 255 255 255) / .45);backdrop-filter:blur(24px) saturate(1.05);}.ds-nav-item{display:flex;align-items:center;gap:12px;width:100%;height:44px;margin:0 0 6px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:rgb(var(--color-fg-secondary, 82 82 93));font-family:\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Noto Sans SC Variable\", \"PingFang SC\", system-ui, sans-serif;font-size:14px;line-height:21px;text-align:left;cursor:pointer;transition:color 120ms,background-color 120ms;}.ds-nav-item:hover{background:rgb(var(--color-surface, 255 255 255) / .6);color:rgb(var(--color-fg, 32 33 36));}.ds-nav-item[aria-current=\"page\"]{background:rgb(var(--color-surface, 255 255 255));color:rgb(var(--color-primary, 89 86 166));font-weight:600;}.ds-nav-item:focus-visible{outline:2px solid rgb(var(--color-ring, 89 86 166));outline-offset:2px;}@media(prefers-reduced-motion:reduce){.ds-nav-item{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;}}"
+      "description": "Sidebar.tsx 的玻璃底、品牌与活动项；BrandMark、Compass、DownloadQueue 来自共享目录的项目原创图形（MIT）。",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><div class=\"ds-brand\"><div class=\"ds-brand-tile\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M5 8.5 8 4h8l3 4.5V18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8.5Z\"/><path d=\"M8 4v4h8V4M12 10.5v6m-3-3 3 3 3-3\"/></svg></div><span>模型下载管理器</span></div><button type=\"button\" class=\"ds-nav-item\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"4\" y=\"3\" width=\"16\" height=\"18\" rx=\"2\"/><path d=\"M8 3v18M11.5 7h5M11.5 11h5M11.5 15h3\"/></svg><span>浏览仓库</span></button><button type=\"button\" class=\"ds-nav-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M5 4v12m-3-3 3 3 3-3M11 5h10M11 11h10M11 17h10M3 21h18\"/></svg><span>下载队列</span></button></nav>",
+      "css": ".ds-nav{width:176px;padding:16px;background:rgb(var(--color-surface, 255 255 255) / .45);backdrop-filter:blur(24px) saturate(1.05);}.ds-nav-item{display:flex;align-items:center;gap:12px;width:100%;height:44px;margin:0 0 6px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:rgb(var(--color-fg-secondary, 82 82 93));font-family:\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Noto Sans SC Variable\", \"PingFang SC\", system-ui, sans-serif;font-size:14px;line-height:21px;text-align:left;cursor:pointer;transition:color 120ms,background-color 120ms;}.ds-nav-item:hover{background:rgb(var(--color-surface, 255 255 255) / .6);color:rgb(var(--color-fg, 32 33 36));}.ds-nav-item[aria-current=\"page\"]{background:rgb(var(--color-surface, 255 255 255));color:rgb(var(--color-primary, 89 86 166));font-weight:600;}.ds-nav-item:focus-visible{outline:2px solid rgb(var(--color-ring, 89 86 166));outline-offset:2px;}@media(prefers-reduced-motion:reduce){.ds-nav-item{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;}}.ds-brand{margin:0 0 36px;padding:0 12px;color:rgb(var(--color-fg, 32 33 36));font-family:\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Noto Sans SC Variable\", \"PingFang SC\", system-ui, sans-serif;font-size:14px;line-height:21px;font-weight:600;}.ds-brand-tile{display:grid;place-items:center;width:40px;height:40px;margin-bottom:16px;border-radius:14px;background:rgb(var(--color-primary, 89 86 166));color:rgb(var(--color-on-primary, 255 255 255));}"
     },
     {
       "name": "Neutral Badge",
@@ -695,7 +746,7 @@
       "kind": "custom",
       "refersTo": "toast",
       "description": "Toasts.tsx 的浮层材质；静态预览不模拟自动关闭或布局测量。",
-      "html": "<div class=\"ds-toast\" role=\"status\"><span class=\"ds-toast-text\">已打开保存目录</span><button type=\"button\" class=\"ds-toast-close\" aria-label=\"关闭提示\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg></button></div>",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span class=\"ds-toast-text\">已打开保存目录</span><button type=\"button\" class=\"ds-toast-close\" aria-label=\"关闭提示\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/></svg></button></div>",
       "css": ".ds-toast{display:flex;align-items:flex-start;gap:10px;width:320px;max-width:calc(100vw - 32px);padding:16px;border-radius:14px;background:rgb(var(--color-surface, 255 255 255) / .92);backdrop-filter:blur(20px) saturate(1.1);box-shadow:0 8px 24px -12px rgb(2 6 23 / 0.30);color:rgb(var(--color-fg, 32 33 36));}.ds-toast-text{flex:1;font-family:\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"Noto Sans SC Variable\", \"PingFang SC\", system-ui, sans-serif;font-size:14px;line-height:20px;font-weight:500;}.ds-toast-close{display:grid;place-items:center;width:36px;height:36px;margin:-4px -4px 0 0;border:0;border-radius:8px;background:transparent;color:rgb(var(--color-fg-muted, 105 105 114));cursor:pointer;transition:background-color 120ms,color 120ms;}.ds-toast-close:hover{background:rgb(var(--color-surface-2, 245 245 247));color:rgb(var(--color-fg, 32 33 36));}.ds-toast-close:focus-visible{outline:2px solid rgb(var(--color-ring, 89 86 166));outline-offset:2px;}@media(prefers-reduced-motion:reduce){.ds-toast-close{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;}}"
     }
   ],

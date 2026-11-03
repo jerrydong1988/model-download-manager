@@ -28,6 +28,8 @@ v0.2.0 新增**单文件多连接分段下载**（实测 4 连接提速 3.3–6.
 
 ## 功能特性
 
+图标系统包含 **70 枚统一 SVG（12 枚原创品牌／业务图形 + 58 枚 Lucide 通用图形）**，配套应用、托盘、PNG 和 Windows ICO 资源。参见[图标资源与用法](assets/icons/README.md)、[浅色总览](assets/icons/catalog-light.jpg)及[深色总览](assets/icons/catalog-dark.jpg)。
+
 - **双数据源浏览**：HuggingFace / ModelScope 仓库搜索（分页加载）、仓库文件树浏览，自动分类为 权重 / 投影器 / 权重矩阵 / 配置 / 其他（`.hgn` 等特殊权重、`mmproj` 投影器、`imatrix` 矩阵均正确识别）；仓库详情支持 **revision 选择**（默认 / 分支 / 标签 / 自定义，v0.2.0）
 - **多选下载**：文件树多选，默认全选模型文件（权重 + 投影器），实时显示选中合计大小
 - **可靠下载引擎**

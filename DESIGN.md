@@ -249,7 +249,7 @@ overlay 阴影用于菜单、对话框、路径提示与键盘辅助链接；toa
 
 control 圆角用于紧凑控件，card 与 overlay 用于面板和浮层；md 用于分段项及紧凑标记，full 用于状态点和进度轨道。尺度见前置令牌。结构边线通常为（1px）；目录行保持开放横边界。
 
-图标使用 Lucide SVG，同层级保持一致。常用图标（12 / 14 / 16 / 20px）；导航图标（18px，描边 1.75），品牌盒子图标（24px，描边 1.6）。
+图标来自统一的 70 枚 SVG 目录：12 枚项目原创品牌／业务图形（MIT），58 枚 Lucide 0.453.0 通用图形（ISC）。以 `src/components/icons/catalog.json` 为图形与来源的唯一目录，由脚本生成 `index.ts`，组件通过 `createIcon.tsx` 统一封装；同层级保持一致。共用（24×24）视框、默认描边（1.75px）、圆端点与圆连接。常用显示尺寸（12 / 14 / 16 / 20px）；导航图标（18px，描边 1.75px）。品牌 `BrandMark` 表达装入模型模块的下载容器，在侧栏以（28px，描边 1.8px）置于（40×40px）蓝紫色圆角底块。
 
 ## Components
 
@@ -261,7 +261,7 @@ control 圆角用于紧凑控件，card 与 overlay 用于面板和浮层；md �
 
 ### Chips and segmented controls
 
-徽章使用 meta、细边线与紧凑内距。默认中性，业务色仍集中维护。来源页签使用淡紫选中项；过滤分段使用浅雾轨道和工作面选中项。保留方向键/Home/End 与 aria-pressed。
+徽章使用 meta、细边线与紧凑内距。默认中性，业务色仍集中维护。任务状态同时使用（12px）语义图标和可见中文文字：时钟表示排队／暂停中，圆内箭头表示下载中，暂停、勾选、警告和叉号分别表示已暂停、完成、错误和取消。来源页签使用淡紫选中项；过滤分段使用浅雾轨道和工作面选中项。保留方向键/Home/End 与 aria-pressed。
 
 ### Cards / Containers
 
@@ -273,7 +273,13 @@ panel 基座为工作面、细边线与 card 圆角，无默认投影和统一�
 
 ### Navigation
 
-轻玻璃底承载导航；活动项使用工作面和主色文字，非活动项使用次级文字。窄屏收起可见文字但保留可访问名称，活动页保留 aria-current，键盘跳过导航链接保留。
+轻玻璃底承载导航；活动项使用工作面和主色文字，非活动项使用次级文字。窄屏收起可见文字但保留可访问名称，活动页保留 aria-current，键盘跳过导航链接保留。仓库、队列、模型库分别使用 `Compass`、`DownloadQueue`、`Library` 的业务轮廓；设置使用 `Settings`。
+
+### Icons and native assets
+
+界面组件和内联 SVG 使用 `currentColor` 随主题继承语义色；`assets/icons/ui/` 保留这一属性。通过 `<img>` 使用外部 SVG 时文字颜色不会传入文件，深色表面使用 `ui-dark/` 的固定浅色版本（#f2f2f5）。应用图标导出保持蓝紫底与白色图形；托盘使用独立、适合小尺寸的简化轮廓，原生入口加载 `src-tauri/icons/tray-icon.png`。
+
+共享组件默认将装饰性图标设为 `aria-hidden`；传入 `aria-label` 或 `aria-labelledby` 的独立图标使用 `role="img"`，并转发 SVG 属性和 ref。图标按钮名称放在按钮上，状态保留可见文字，图形尺寸不改变控件点击区域。SVG、PNG、ICO 由同一目录导出；PNG 内嵌来源、源 SVG 摘要和授权信息，ICO 使用同名 JSON 来源记录。资源、生成命令和许可详见 `assets/icons/README.md`。
 
 ### Directory rows and action shelves
 

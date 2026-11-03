@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Search,
   X,
-} from 'lucide-react'
+} from '../icons'
 import type {
   DownloadTask,
   FileKind,

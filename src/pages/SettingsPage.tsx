@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../components/icons'
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,7 +21,7 @@ import {
   ShieldAlert,
   Sun,
   Undo2,
-} from 'lucide-react'
+} from '../components/icons'
 import type { Settings, Source, ThemeSetting } from '../types'
 import { bytesToMb, clampInt, formatSpeed, parseMbToBytes } from '../lib/format'
 import {

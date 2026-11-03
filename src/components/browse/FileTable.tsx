@@ -6,7 +6,7 @@ import {
   type FileStateInfo,
 } from './RepoDetailHeader'
 import { EmptyState } from '../ui/EmptyState'
-import { FileQuestion } from 'lucide-react'
+import { FileQuestion } from '../icons'
 
 const ROW_HEIGHT = 48
 const OVERSCAN = 10

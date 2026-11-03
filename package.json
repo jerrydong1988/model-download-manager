@@ -15,7 +15,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "icons": "python scripts/gen-icons.py"
+    "icons": "node scripts/gen-icons.mjs",
+    "check:icons": "node scripts/check-icons.mjs"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "^5.3.1",

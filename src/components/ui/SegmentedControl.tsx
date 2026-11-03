@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../icons'
 import { cx } from '../../lib/cx'
 
 export interface SegmentedOption<T extends string> {

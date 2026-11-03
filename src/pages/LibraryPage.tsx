@@ -13,7 +13,7 @@ import {
   Search,
   SearchX,
   X,
-} from 'lucide-react'
+} from '../components/icons'
 import type { FileKind, LocalFile } from '../types'
 import { normalizeDownloadDir } from '../lib/downloadPaths'
 import {

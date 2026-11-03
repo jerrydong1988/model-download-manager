@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, X } from '../icons'
 import { Button } from './Button'
 import { cx } from '../../lib/cx'
 

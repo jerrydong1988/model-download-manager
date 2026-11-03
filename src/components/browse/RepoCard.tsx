@@ -1,4 +1,4 @@
-import { ArrowRight, Download, Heart, ShieldAlert } from 'lucide-react'
+import { ArrowRight, Download, Heart, ShieldAlert } from '../icons'
 import type { RepoSummary } from '../../types'
 import { formatCount, formatIsoDate } from '../../lib/format'
 import { pipelineTagLabel } from '../../lib/labels'

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, GitBranch, Pencil, Tag } from 'lucide-react'
+import { Check, ChevronDown, GitBranch, Pencil, Tag } from '../icons'
 import type { Source } from '../../types'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'

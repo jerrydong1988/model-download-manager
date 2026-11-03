@@ -18,7 +18,7 @@ import {
   Projector,
   RefreshCw,
   Trash2,
-} from 'lucide-react'
+} from '../components/icons'
 import '../styles.css'
 import type { TaskStatus } from '../types'
 import { applyTheme, resolveTheme } from '../lib/theme'

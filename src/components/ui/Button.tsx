@@ -1,5 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '../icons'
 import { cx } from '../../lib/cx'
 
 export type ButtonVariant =

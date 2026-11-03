@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen } from '../icons'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { ShortcutsHelpDialog } from './ShortcutsHelpDialog'

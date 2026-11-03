@@ -9,7 +9,7 @@ import {
   Play,
   SearchX,
   Trash2,
-} from 'lucide-react'
+} from '../components/icons'
 import type { DownloadTask, TaskStatus } from '../types'
 import {
   cancelDownload,

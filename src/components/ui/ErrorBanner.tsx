@@ -1,4 +1,4 @@
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, RefreshCw } from '../icons'
 import { Button } from './Button'
 import { cx } from '../../lib/cx'
 

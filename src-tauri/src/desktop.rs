@@ -158,10 +158,8 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|err| format!("创建托盘菜单项失败：{err}"))?;
     let menu = Menu::with_items(app, &[&show_item, &pause_item, &resume_item, &quit_item])
         .map_err(|err| format!("创建托盘菜单失败：{err}"))?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| "缺少默认窗口图标，无法创建托盘".to_string())?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+        .map_err(|err| format!("加载托盘图标失败：{err}"))?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)

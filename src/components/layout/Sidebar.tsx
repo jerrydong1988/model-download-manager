@@ -1,5 +1,5 @@
-import { Boxes, Compass, Download, FolderOpen, Settings } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { BrandMark, Compass, Download, DownloadQueue, Library, Settings } from '../icons'
+import type { LucideIcon } from '../icons'
 import { useAppStore, type PageKey } from '../../store/appStore'
 import { formatSpeed } from '../../lib/format'
 import { isRunningStatus } from '../../lib/labels'
@@ -7,8 +7,8 @@ import { cx } from '../../lib/cx'
 
 const NAV: Array<{ page: PageKey; label: string; icon: LucideIcon }> = [
   { page: 'browse', label: '浏览仓库', icon: Compass },
-  { page: 'downloads', label: '下载队列', icon: Download },
-  { page: 'library', label: '本地模型库', icon: FolderOpen },
+  { page: 'downloads', label: '下载队列', icon: DownloadQueue },
+  { page: 'library', label: '本地模型库', icon: Library },
   { page: 'settings', label: '设置', icon: Settings },
 ]
 
@@ -23,8 +23,8 @@ export function Sidebar() {
   return (
     <aside className="glass-sidebar flex h-full w-[68px] shrink-0 flex-col px-2 py-6 md:w-[208px] md:px-4">
       <div className="mb-9 px-2 md:px-3">
-        <div className="mb-4 grid h-10 w-10 place-items-center rounded-card bg-fg text-surface">
-          <Boxes className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
+        <div className="mb-4 grid h-10 w-10 place-items-center rounded-card bg-primary text-primary-on">
+          <BrandMark className="h-7 w-7" strokeWidth={1.8} aria-hidden="true" />
         </div>
         <p className="hidden text-body font-semibold text-fg md:block">模型下载管理器</p>
         <p className="mt-1 hidden text-meta leading-5 text-fg-muted md:block">Model Download Manager</p>

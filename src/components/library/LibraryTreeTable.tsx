@@ -11,7 +11,7 @@ import {
   Grid3x3,
   Projector,
   Trash2,
-} from 'lucide-react'
+} from '../icons'
 import type {
   LibraryDir,
   LibraryDirRow,

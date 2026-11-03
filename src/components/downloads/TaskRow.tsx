@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../icons'
 import {
   AlertCircle,
   ArrowDown,
@@ -16,7 +16,7 @@ import {
   RotateCcw,
   Trash2,
   X,
-} from 'lucide-react'
+} from '../icons'
 import type { DownloadTask } from '../../types'
 import {
   defaultRevisionFor,

@@ -1,4 +1,4 @@
-import { FlaskConical, Keyboard } from 'lucide-react'
+import { FlaskConical, Keyboard } from '../icons'
 import { IS_MOCK_MODE } from '../../lib/ipc'
 import { Button } from '../ui/Button'
 

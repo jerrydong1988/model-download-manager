@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Compass, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronDown, Compass, RefreshCw, Search, X } from '../components/icons'
 import type { RepoSearchPage, RepoSummary, Source } from '../types'
 import { searchRepos, toErrorText } from '../lib/ipc'
 import { RepoCard } from '../components/browse/RepoCard'

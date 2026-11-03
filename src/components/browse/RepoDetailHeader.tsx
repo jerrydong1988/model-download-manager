@@ -5,7 +5,7 @@ import {
   Download,
   Heart,
   ShieldAlert,
-} from 'lucide-react'
+} from '../icons'
 import type { RepoDetail, RepoFile, Source } from '../../types'
 import { formatBytes, formatCount, formatIsoDate } from '../../lib/format'
 import { SOURCE_LABEL } from '../../lib/labels'

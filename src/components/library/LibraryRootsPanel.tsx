@@ -7,7 +7,7 @@ import {
   FolderTree,
   RefreshCw,
   Trash2,
-} from 'lucide-react'
+} from '../icons'
 import { formatBytes, formatRelativeTime } from '../../lib/format'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'

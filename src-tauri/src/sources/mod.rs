@@ -37,6 +37,11 @@ pub fn encode_path(path: &str) -> String {
         .join("/")
 }
 
+/// A revision is one route parameter, even when its name contains '/'.
+pub fn encode_revision(revision: &str) -> String {
+    utf8_percent_encode(revision, &PATH_SEGMENT.add(b'/')).to_string()
+}
+
 /// 当前设置下某数据源的端点（已去除尾部 `/`）。
 pub fn endpoint(settings: &Settings, source: Source) -> &str {
     match source {
@@ -92,7 +97,7 @@ pub fn download_url(
 ) -> String {
     let base = endpoint(settings, source);
     let repo = encode_path(repo_id);
-    let revision = encode_path(revision);
+    let revision = encode_revision(revision);
     let remote = encode_path(remote_path);
     match source {
         Source::Huggingface => format!("{base}/{repo}/resolve/{revision}/{remote}"),

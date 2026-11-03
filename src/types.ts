@@ -108,6 +108,8 @@ export interface RepoDetail {
 
 /** 下载任务（命令 4-12 / 事件） */
 export interface DownloadTask {
+  /** Backend mutation sequence; absent in legacy/mock events. */
+  updateSeq?: number
   taskId: string
   source: Source
   repoId: string
@@ -254,6 +256,7 @@ export interface ListRevisionsArgs {
 
 /** download-progress：每任务限流 ≤ 4 次/秒 */
 export interface DownloadProgressEvent {
+  updateSeq?: number
   taskId: string
   downloaded: number
   totalSize: number

@@ -36,7 +36,6 @@ export default function App() {
   useEffect(() => {
     const state = useAppStore.getState()
     const cleanup = state.connectEvents()
-    void state.loadSnapshot()
     return cleanup
   }, [])
 

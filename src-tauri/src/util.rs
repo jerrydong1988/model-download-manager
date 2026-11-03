@@ -154,7 +154,11 @@ pub fn sanitize_segment(segment: &str) -> Result<String, String> {
     if segment.ends_with('.') || segment.ends_with(' ') {
         return Err(format!("路径段不能以点或空格结尾：{segment}"));
     }
-    let stem = segment.split('.').next().unwrap_or(segment).to_ascii_uppercase();
+    let stem = segment
+        .split('.')
+        .next()
+        .unwrap_or(segment)
+        .to_ascii_uppercase();
     if RESERVED_NAMES.contains(&stem.as_str()) {
         return Err(format!("路径使用了系统保留名：{segment}"));
     }
@@ -281,13 +285,20 @@ fn build_task_paths_inner(
     let remote_path = sanitize_remote_path(remote_path)?;
 
     let mut final_path = PathBuf::from(save_dir.trim());
+    // Put revisions outside the repository tree. A single hex component preserves
+    // case and slashes without aliasing a directory inside the default revision.
+    if let Some(revision) = revision {
+        final_path.push(".mdm-revisions");
+        final_path.push(
+            revision
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+        );
+    }
     for segment in repo_id.split('/') {
         final_path.push(segment);
-    }
-    if let Some(revision) = revision {
-        for segment in revision.split('/') {
-            final_path.push(segment);
-        }
     }
     for segment in remote_path.split('/') {
         final_path.push(segment);
@@ -307,6 +318,38 @@ pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut os = path.as_os_str().to_os_string();
     os.push(suffix);
     PathBuf::from(os)
+}
+
+/// Compare physical output paths even when spelling, separators or casing differ.
+pub fn task_path_key(path: &Path) -> String {
+    let canonical = path
+        .canonicalize()
+        .ok()
+        .or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))
+        .unwrap_or_else(|| path.to_path_buf());
+    let key = canonical.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    {
+        key.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        key
+    }
+}
+
+pub fn task_paths_conflict(left: &Path, right: &Path) -> bool {
+    let paths = |path: &Path| {
+        [
+            path.to_path_buf(),
+            with_suffix(path, ".part"),
+            with_suffix(path, ".part.json"),
+        ]
+        .map(|path| task_path_key(&path))
+    };
+    let left = paths(left);
+    let right = paths(right);
+    left.iter().any(|key| right.contains(key))
 }
 
 /// 下载前准备：校验 saveDir、创建下载目录与各父目录、拒绝符号链接/junction/越界路径。
@@ -379,17 +422,11 @@ pub fn ensure_safe_relative(root_canon: &Path, relative: &Path) -> Result<(), St
                 }
                 if is_target {
                     if file_type.is_dir() {
-                        return Err(format!(
-                            "目标路径是目录而不是文件：{}",
-                            current.display()
-                        ));
+                        return Err(format!("目标路径是目录而不是文件：{}", current.display()));
                     }
                 } else {
                     if !file_type.is_dir() {
-                        return Err(format!(
-                            "父路径不是目录：{}",
-                            current.display()
-                        ));
+                        return Err(format!("父路径不是目录：{}", current.display()));
                     }
                     verify_within_root(root_canon, &current)?;
                 }
@@ -484,8 +521,7 @@ pub fn atomic_write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Resul
 
 /// 读取 JSON 文件（失败返回中文错误）。
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("读取文件失败 {}：{e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败 {}：{e}", path.display()))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("解析 JSON 失败 {}：{e}", path.display()))
 }
 
@@ -575,16 +611,16 @@ pub fn emit_progress(
 
 /// 发送 `tasks-removed { taskIds }`。
 pub fn emit_tasks_removed(sink: &dyn EventSink, task_ids: &[String]) {
-    sink.emit(
-        "tasks-removed",
-        serde_json::json!({ "taskIds": task_ids }),
-    );
+    sink.emit("tasks-removed", serde_json::json!({ "taskIds": task_ids }));
 }
 
 /// 发送 `settings-updated { settings }`。
 pub fn emit_settings_updated(sink: &dyn EventSink, settings: &Settings) {
     match serde_json::to_value(settings) {
-        Ok(settings) => sink.emit("settings-updated", serde_json::json!({ "settings": settings })),
+        Ok(settings) => sink.emit(
+            "settings-updated",
+            serde_json::json!({ "settings": settings }),
+        ),
         Err(err) => eprintln!("序列化设置失败：{err}"),
     }
 }
@@ -598,6 +634,7 @@ pub fn build_http_client(settings: &Settings) -> Result<reqwest::Client, String>
     let mut builder = reqwest::Client::builder()
         .user_agent("ModelDownloadManager/0.1 (+https://github.com/)")
         .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::limited(10));
     let proxy = settings.proxy.trim();
     if !proxy.is_empty() {
@@ -689,6 +726,7 @@ impl BandwidthLimiter {
         if bytes == 0 {
             return;
         }
+        let mut remaining = bytes as f64;
         loop {
             let rate = self.rate();
             if rate == 0 {
@@ -701,11 +739,13 @@ impl BandwidthLimiter {
                 bucket.last = now;
                 // 允许最多 1 秒的突发额度，避免短时抖动。
                 bucket.tokens = (bucket.tokens + elapsed * rate as f64).min(rate as f64);
-                if bucket.tokens >= bytes as f64 {
-                    bucket.tokens -= bytes as f64;
+                let consumed = bucket.tokens.min(remaining);
+                bucket.tokens -= consumed;
+                remaining -= consumed;
+                if remaining <= 0.0 {
                     return;
                 }
-                (bytes as f64 - bucket.tokens) / rate as f64
+                remaining / rate as f64
             };
             let sleep = Duration::from_secs_f64(wait_secs.clamp(0.001, 0.05));
             tokio::time::sleep(sleep).await;
@@ -762,9 +802,7 @@ impl CancelFlag {
 /// 用户可见的错误信息或日志里。
 pub fn redact_urls(text: &str) -> String {
     fn find_url_start(text: &str) -> Option<(usize, usize)> {
-        let https = text
-            .find("https://")
-            .map(|index| (index, "https://".len()));
+        let https = text.find("https://").map(|index| (index, "https://".len()));
         let http = text.find("http://").map(|index| (index, "http://".len()));
         match (https, http) {
             (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
@@ -820,8 +858,14 @@ mod tests {
     fn classifies_files_per_contract() {
         assert_eq!(classify_file("model.safetensors"), FileKind::Weight);
         assert_eq!(classify_file("model-00001-of-00004.bin"), FileKind::Weight);
-        assert_eq!(classify_file("model.safetensors.index.json"), FileKind::Weight);
-        assert_eq!(classify_file("pytorch_model.bin.index.json"), FileKind::Weight);
+        assert_eq!(
+            classify_file("model.safetensors.index.json"),
+            FileKind::Weight
+        );
+        assert_eq!(
+            classify_file("pytorch_model.bin.index.json"),
+            FileKind::Weight
+        );
         assert_eq!(classify_file("pytorch_model.bin"), FileKind::Weight);
         assert_eq!(classify_file("model.onnx"), FileKind::Weight);
         assert_eq!(classify_file("weights.pkl"), FileKind::Weight);
@@ -876,7 +920,10 @@ mod tests {
     #[test]
     fn classifies_imatrix_per_contract() {
         // 重要性矩阵：权重类扩展名 + imatrix 词元。
-        assert_eq!(classify_file("imatrix_unsloth.gguf_file"), FileKind::Imatrix);
+        assert_eq!(
+            classify_file("imatrix_unsloth.gguf_file"),
+            FileKind::Imatrix
+        );
         assert_eq!(classify_file("imatrix.gguf"), FileKind::Imatrix);
         assert_eq!(classify_file("imatrix.dat"), FileKind::Imatrix);
         assert_eq!(classify_file("org/model/imatrix.gguf"), FileKind::Imatrix);
@@ -927,10 +974,7 @@ mod tests {
             "CON",
             "a/aux.bin",
         ] {
-            assert!(
-                sanitize_remote_path(bad).is_err(),
-                "应拒绝非法路径: {bad}"
-            );
+            assert!(sanitize_remote_path(bad).is_err(), "应拒绝非法路径: {bad}");
         }
         assert_eq!(
             sanitize_remote_path("sub dir/model-00001-of-00004.safetensors").unwrap(),
@@ -952,8 +996,7 @@ mod tests {
 
     #[test]
     fn builds_paths_under_save_dir() {
-        let paths =
-            build_task_paths("C:\\Models", "org/model", "sub/model.safetensors").unwrap();
+        let paths = build_task_paths("C:\\Models", "org/model", "sub/model.safetensors").unwrap();
         assert_eq!(
             paths.final_path,
             PathBuf::from("C:\\Models\\org\\model\\sub\\model.safetensors")
@@ -991,7 +1034,10 @@ mod tests {
             "master",
         )
         .unwrap();
-        assert_eq!(ms_default, legacy, "ModelScope 默认 revision 路径必须保持不变");
+        assert_eq!(
+            ms_default, legacy,
+            "ModelScope 默认 revision 路径必须保持不变"
+        );
 
         // 非默认 revision → 增加 revision 段。
         let tagged = build_task_paths_revision(
@@ -1004,11 +1050,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             tagged.final_path,
-            PathBuf::from("C:\\Models\\org\\model\\v1.0\\sub\\model.safetensors")
+            PathBuf::from(
+                "C:\\Models\\.mdm-revisions\\76312e30\\org\\model\\sub\\model.safetensors"
+            )
         );
         assert_eq!(
             tagged.part_path,
-            PathBuf::from("C:\\Models\\org\\model\\v1.0\\sub\\model.safetensors.part")
+            PathBuf::from(
+                "C:\\Models\\.mdm-revisions\\76312e30\\org\\model\\sub\\model.safetensors.part"
+            )
         );
         assert_ne!(
             tagged.final_path, legacy.final_path,
@@ -1026,7 +1076,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             branch.final_path,
-            PathBuf::from("C:\\Models\\org\\model\\refs\\pr\\3\\config.json")
+            PathBuf::from(
+                "C:\\Models\\.mdm-revisions\\726566732f70722f33\\org\\model\\config.json"
+            )
         );
 
         // 非法 revision 拒绝（`..`、盘符、反斜杠、绝对路径、空）。
@@ -1052,7 +1104,7 @@ mod tests {
             .parent()
             .unwrap()
             .to_string_lossy()
-            .contains("dev"));
+            .contains(".mdm-revisions"));
         // 默认 revision 不增加额外目录。
         let default_paths =
             prepare_download_revision(&root_str, "org/model", "dir/weights.bin", "main", "main")

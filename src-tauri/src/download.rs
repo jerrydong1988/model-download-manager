@@ -72,7 +72,10 @@ pub struct PartProgress {
 }
 
 /// 读取 `.part.json` + `.part` 计算任务已下载进度（供 queue 恢复/展示）。
-pub fn read_part_progress(part_path: &std::path::Path, meta_path: &std::path::Path) -> PartProgress {
+pub fn read_part_progress(
+    part_path: &std::path::Path,
+    meta_path: &std::path::Path,
+) -> PartProgress {
     let meta: PartMeta = util::read_json_opt(meta_path).unwrap_or_default();
     let part_len = std::fs::metadata(part_path)
         .map(|metadata| metadata.len())
@@ -311,6 +314,17 @@ pub(crate) enum WaitOutcome {
     Cancelled,
 }
 
+pub(crate) async fn with_control<F: std::future::Future>(
+    control: &TaskControl,
+    future: F,
+) -> Result<F::Output, WaitOutcome> {
+    tokio::select! {
+        biased;
+        _ = control.stopped() => Err(if control.is_cancelled() { WaitOutcome::Cancelled } else { WaitOutcome::Paused }),
+        result = future => Ok(result),
+    }
+}
+
 pub(crate) async fn sleep_with_control(control: &TaskControl, duration: Duration) -> WaitOutcome {
     let deadline = Instant::now() + duration;
     loop {
@@ -472,7 +486,19 @@ async fn stream_to_part(
 
     let mut downloaded = start_offset;
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = match with_control(&ctx.control, stream.next()).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(reason) => {
+                let _ = file.flush().await;
+                return Err(if matches!(reason, WaitOutcome::Cancelled) {
+                    StreamStop::Cancel
+                } else {
+                    StreamStop::Pause
+                });
+            }
+        };
         // 取消优先于暂停。
         if ctx.control.is_cancelled() {
             let _ = file.flush().await;
@@ -494,7 +520,16 @@ async fn stream_to_part(
         if chunk.is_empty() {
             continue;
         }
-        ctx.limiter.acquire(chunk.len() as u64).await;
+        if let Err(reason) =
+            with_control(&ctx.control, ctx.limiter.acquire(chunk.len() as u64)).await
+        {
+            let _ = file.flush().await;
+            return Err(if matches!(reason, WaitOutcome::Cancelled) {
+                StreamStop::Cancel
+            } else {
+                StreamStop::Pause
+            });
+        }
         // 限速等待期间可能被暂停/取消。
         if ctx.control.is_cancelled() {
             let _ = file.flush().await;
@@ -646,6 +681,8 @@ pub async fn transfer_auto(
     ctx: TransferContext,
     sink: &dyn EventSink,
 ) -> Result<TransferOutcome, DownloadError> {
+    prepare_target(&ctx).await?;
+    discard_untracked_part(&ctx).await?;
     let stored_meta: PartMeta = util::read_json_opt(&ctx.meta_path).unwrap_or_default();
     if stored_meta.is_segmented() {
         prepare_target(&ctx).await?;
@@ -692,6 +729,31 @@ pub async fn transfer_auto(
     }
 }
 
+/// A bare/preallocated part is not proof of downloaded bytes. Only resume a
+/// sidecar belonging to this file; failed writes must never turn zeros into data.
+async fn discard_untracked_part(ctx: &TransferContext) -> Result<(), DownloadError> {
+    let tracked = util::read_json_opt::<PartMeta>(&ctx.meta_path)
+        .map(|meta| meta.repo_id == ctx.repo_id && meta.remote_path == ctx.remote_path)
+        .unwrap_or(false);
+    if !tracked && tokio::fs::try_exists(&ctx.part_path).await.unwrap_or(false) {
+        tokio::fs::remove_file(&ctx.part_path)
+            .await
+            .map_err(|error| {
+                DownloadError::non_retryable(format!("无法清理缺少有效断点信息的临时文件：{error}"))
+            })?;
+        match tokio::fs::remove_file(&ctx.meta_path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(DownloadError::non_retryable(format!(
+                    "无法清理损坏的断点信息：{error}"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 单文件传输主循环。
 pub async fn transfer(
     ctx: TransferContext,
@@ -702,6 +764,7 @@ pub async fn transfer(
 
     // 0. 拒绝符号链接目标 + 创建父目录（下载前检查，契约 §5.1）。
     prepare_target(ctx).await?;
+    discard_untracked_part(ctx).await?;
 
     // 1. 最终文件已存在且大小一致 → 直接完成（不重复下载）。
     if ctx.total_size > 0 {
@@ -759,8 +822,15 @@ pub async fn transfer(
     // 2. 上次已下载完整但尚未 rename（例如完成瞬间被暂停/崩溃）。
     //    仅当 part 长度**恰好等于** total 时直接完成（P1-3）。
     if total_size > 0 && downloaded == total_size {
-        return finish_transfer(ctx, downloaded, total_size, etag, last_modified, &mut progress)
-            .await;
+        return finish_transfer(
+            ctx,
+            downloaded,
+            total_size,
+            etag,
+            last_modified,
+            &mut progress,
+        )
+        .await;
     }
 
     let mut retries_used: u32 = 0;
@@ -818,11 +888,27 @@ pub async fn transfer(
         }
         if downloaded > 0 {
             request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
+            if let Some(validator) = etag.as_deref().or(last_modified.as_deref()) {
+                request = request.header(reqwest::header::IF_RANGE, validator);
+            }
         }
 
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(err) => {
+        let response = match with_control(&ctx.control, request.send()).await {
+            Ok(Ok(response)) => response,
+            Err(WaitOutcome::Cancelled) => {
+                return Ok(cancel_outcome(ctx, sink, downloaded, total_size))
+            }
+            Err(_) => {
+                return Ok(pause_outcome(
+                    ctx,
+                    sink,
+                    downloaded,
+                    total_size,
+                    etag,
+                    last_modified,
+                ))
+            }
+            Ok(Err(err)) => {
                 let reason = util::redact_urls(&format!("网络请求失败（{err}）"));
                 if let Some(outcome) = retry_or_stop(
                     ctx,
@@ -853,26 +939,34 @@ pub async fn transfer(
                 let range_start = content_range.and_then(|range| range.start);
                 // 标准 206 视为续传；此外 ModelScope 实测对 Range 请求返回
                 // `200 + Content-Range: bytes N-M/T`（非标准），只要起点一致也按续传处理。
-                let resume_semantics = range_start == Some(downloaded)
-                    && (status.as_u16() == 206 || downloaded > 0);
+                let resume_semantics =
+                    range_start == Some(downloaded) && (status.as_u16() == 206 || downloaded > 0);
 
                 if resume_semantics {
                     // 续传前校验 etag/lastModified，不一致说明远端已变 → 删除 part 从头下载（最多 1 次）。
                     if downloaded > 0
                         && !resume_headers_match(
-                            &stored_meta,
+                            &PartMeta {
+                                etag: etag.clone(),
+                                last_modified: last_modified.clone(),
+                                ..PartMeta::default()
+                            },
                             response_etag.as_deref(),
                             response_last_modified.as_deref(),
                         )
                     {
                         if remote_reset_used {
-                            return Err(DownloadError::non_retryable("远端文件已更新，请重新开始下载"));
+                            return Err(DownloadError::non_retryable(
+                                "远端文件已更新，请重新开始下载",
+                            ));
                         }
                         remote_reset_used = true;
                         let _ = tokio::fs::remove_file(&ctx.part_path).await;
                         let _ = tokio::fs::remove_file(&ctx.meta_path).await;
                         downloaded = 0;
                         total_size = ctx.total_size;
+                        etag = None;
+                        last_modified = None;
                         progress.emit(0, total_size, true);
                         continue 'transfer;
                     }
@@ -916,6 +1010,14 @@ pub async fn transfer(
                     continue 'transfer;
                 } else {
                     // 200 且无有效 Content-Range：服务器不支持 Range（或远端已变）→ 截断 part 从头写。
+                    // Remove the old prefix before associating it with new response validators.
+                    if downloaded > 0 {
+                        tokio::fs::remove_file(&ctx.part_path)
+                            .await
+                            .map_err(|error| {
+                                DownloadError::non_retryable(format!("无法重置临时文件：{error}"))
+                            })?;
+                    }
                     if let Some(length) = response.content_length() {
                         if length > 0 {
                             total_size = length;
@@ -954,7 +1056,7 @@ pub async fn transfer(
                     return finish_transfer(
                         ctx,
                         downloaded,
-                        total_size,
+                        range_total.unwrap_or(downloaded),
                         etag,
                         last_modified,
                         &mut progress,
@@ -1036,9 +1138,7 @@ async fn finish_or_retry(
         .await?;
         return Ok(Some(outcome));
     }
-    let reason = format!(
-        "连接中断，文件未下载完整（已下载 {written}/{total_size} 字节）"
-    );
+    let reason = format!("连接中断，文件未下载完整（已下载 {written}/{total_size} 字节）");
     save_part_meta(ctx, total_size, etag, last_modified);
     retry_or_stop(
         ctx,
@@ -1127,9 +1227,21 @@ mod tests {
             total: 100,
             ..Default::default()
         };
-        assert!(resume_headers_match(&meta, Some("\"abc\""), Some("Wed, 21 Oct 2015 07:28:00 GMT")));
-        assert!(!resume_headers_match(&meta, Some("\"def\""), Some("Wed, 21 Oct 2015 07:28:00 GMT")));
-        assert!(!resume_headers_match(&meta, Some("\"abc\""), Some("Thu, 22 Oct 2015 07:28:00 GMT")));
+        assert!(resume_headers_match(
+            &meta,
+            Some("\"abc\""),
+            Some("Wed, 21 Oct 2015 07:28:00 GMT")
+        ));
+        assert!(!resume_headers_match(
+            &meta,
+            Some("\"def\""),
+            Some("Wed, 21 Oct 2015 07:28:00 GMT")
+        ));
+        assert!(!resume_headers_match(
+            &meta,
+            Some("\"abc\""),
+            Some("Thu, 22 Oct 2015 07:28:00 GMT")
+        ));
         // 记录缺失或响应缺失时不阻塞续传。
         meta.etag = None;
         assert!(resume_headers_match(&meta, Some("\"def\""), None));

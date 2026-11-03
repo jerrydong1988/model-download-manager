@@ -26,6 +26,10 @@ export function isStaleStatusRegression(previous: TaskStatus, incoming: TaskStat
 
 /** 合并同一任务的两份快照（incoming 覆盖 previous，但拒绝过期降级与进度回退）。 */
 export function mergeTask(previous: DownloadTask, incoming: DownloadTask): DownloadTask {
+  if (incoming.updateSeq !== undefined && previous.updateSeq !== undefined) {
+    if (incoming.updateSeq < previous.updateSeq) return previous
+    if (incoming.updateSeq > previous.updateSeq) return { ...previous, ...incoming }
+  }
   const status = isStaleStatusRegression(previous.status, incoming.status)
     ? previous.status
     : incoming.status
@@ -76,10 +80,12 @@ export function applyProgressToTask(
   task: DownloadTask,
   progress: DownloadProgressEvent,
 ): DownloadTask {
+  const ordered = progress.updateSeq !== undefined
+  if (ordered && task.updateSeq !== undefined && progress.updateSeq! <= task.updateSeq) return task
   if (task.status === 'completed' || task.status === 'cancelled') return task
 
   const totalSize = progress.totalSize > 0 ? progress.totalSize : task.totalSize
-  const downloaded = Math.max(task.downloaded, progress.downloaded)
+  const downloaded = ordered ? progress.downloaded : Math.max(task.downloaded, progress.downloaded)
   const boundedDownloaded = totalSize > 0 ? Math.min(downloaded, totalSize) : downloaded
   const looksRunning =
     task.status === 'queued' && (progress.speed > 0 || progress.downloaded > task.downloaded)
@@ -91,7 +97,7 @@ export function applyProgressToTask(
     task.downloaded === boundedDownloaded &&
     task.totalSize === totalSize &&
     task.speed === speed &&
-    task.status === status
+    task.status === status && (!ordered || task.updateSeq === progress.updateSeq)
   ) {
     return task
   }
@@ -101,5 +107,22 @@ export function applyProgressToTask(
     totalSize,
     speed,
     status,
+    ...(ordered ? { updateSeq: progress.updateSeq } : {}),
   }
+}
+
+export type SnapshotMutation =
+  | { kind: 'tasks'; tasks: DownloadTask[] }
+  | { kind: 'progress'; progress: DownloadProgressEvent }
+  | { kind: 'remove'; ids: string[] }
+
+/** A fresh snapshot replaces stale cache; only replay mutations received while awaiting it. */
+export function reconcileTaskSnapshot(snapshot: DownloadTask[], mutations: SnapshotMutation[]): DownloadTask[] {
+  let tasks = snapshot.slice()
+  for (const mutation of mutations) {
+    if (mutation.kind === 'tasks') tasks = mergeTaskLists(tasks, mutation.tasks)
+    else if (mutation.kind === 'remove') tasks = tasks.filter(task => !mutation.ids.includes(task.taskId))
+    else tasks = tasks.map(task => task.taskId === mutation.progress.taskId ? applyProgressToTask(task, mutation.progress) : task)
+  }
+  return tasks.sort(compareTasks)
 }

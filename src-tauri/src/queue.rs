@@ -12,9 +12,9 @@ use std::sync::Arc;
 #[cfg(not(test))]
 use std::time::{Duration, Instant};
 
-use crate::download::{read_part_progress, DownloadError, TransferOutcome};
 #[cfg(not(test))]
 use crate::download::{self, TransferContext};
+use crate::download::{read_part_progress, DownloadError, TransferOutcome};
 use crate::models::{DownloadRequest, DownloadTask, TaskStatus};
 #[cfg(not(test))]
 use crate::sources;
@@ -40,7 +40,7 @@ struct QueueSink {
 
 #[cfg(not(test))]
 impl EventSink for QueueSink {
-    fn emit(&self, event: &str, payload: serde_json::Value) {
+    fn emit(&self, event: &str, mut payload: serde_json::Value) {
         use tauri::Emitter;
 
         if event == "download-progress" {
@@ -51,13 +51,16 @@ impl EventSink for QueueSink {
             if let (Some(task_id), Some(downloaded), Some(total_size), Some(speed)) =
                 (task_id, downloaded, total_size, speed)
             {
-                self.state.update_task(task_id, |task| {
+                let updated = self.state.update_task(task_id, |task| {
                     task.downloaded = downloaded;
                     if total_size > 0 {
                         task.total_size = total_size;
                     }
                     task.speed = speed;
                 });
+                if let Some(task) = updated {
+                    payload["updateSeq"] = serde_json::json!(task.update_seq);
+                }
             }
         }
         if let Err(err) = self.app.emit(event, payload) {
@@ -147,6 +150,27 @@ async fn pump_loop(app: tauri::AppHandle, state: Arc<AppState>) {
 #[cfg(not(test))]
 fn start_task(app: &tauri::AppHandle, state: &Arc<AppState>, task: DownloadTask) {
     let task_id = task.task_id.clone();
+    // Old persisted queues may already contain aliases created by v0.2.0.
+    if state.tasks_snapshot().iter().any(|other| {
+        other.task_id != task_id
+            && util::task_paths_conflict(Path::new(&other.save_path), Path::new(&task.save_path))
+    }) {
+        if let TransitionOutcome::Updated(task) =
+            state.transition_task(&task_id, &[TaskStatus::Queued], |task| {
+                task.status = TaskStatus::Error;
+                task.error =
+                    Some("目标路径与其他任务冲突，请清理冲突记录或改用其他下载目录".to_string());
+            })
+        {
+            let sink = QueueSink {
+                app: app.clone(),
+                state: state.clone(),
+            };
+            util::emit_task_updated(&sink, &task);
+            state.mark_dirty(true);
+        }
+        return;
+    }
     let settings = state.current_settings();
     let part_path = PathBuf::from(&task.temp_path);
     let meta_path = util::with_suffix(&part_path, ".json");
@@ -211,9 +235,7 @@ fn start_task(app: &tauri::AppHandle, state: &Arc<AppState>, task: DownloadTask)
     let retry_app = app.clone();
     let retry_task_id = task_id.clone();
     let on_retry: download::RetryCallback = Arc::new(move |retries: u32| {
-        if let Some(task) =
-            retry_state.update_task(&retry_task_id, |task| task.retries = retries)
-        {
+        if let Some(task) = retry_state.update_task(&retry_task_id, |task| task.retries = retries) {
             let sink = QueueSink {
                 app: retry_app.clone(),
                 state: retry_state.clone(),
@@ -416,6 +438,10 @@ pub fn start_downloads(
     requests: Vec<DownloadRequest>,
     sink: &dyn EventSink,
 ) -> Result<Vec<DownloadTask>, String> {
+    let _enqueue = state
+        .enqueue_lock
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     if requests.is_empty() {
         return Ok(Vec::new());
     }
@@ -444,9 +470,7 @@ pub fn start_downloads(
             skipped_errors[0]
         );
     }
-    let has_queued = created
-        .iter()
-        .any(|task| task.status == TaskStatus::Queued);
+    let has_queued = created.iter().any(|task| task.status == TaskStatus::Queued);
     state.insert_tasks(created.clone());
     for task in &created {
         util::emit_task_updated(sink, task);
@@ -467,7 +491,11 @@ fn build_task_from_request(
     let repo_id = util::sanitize_repo_id(&request.repo_id)?;
     let remote_path = util::sanitize_remote_path(&request.remote_path)?;
     // v0.2.0：revision 缺省用来源默认值；自定义文本按仓库相对路径规则净化（允许 `feature/x`）。
-    let revision = match request.revision.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    let revision = match request
+        .revision
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
         Some(raw) => util::sanitize_remote_path(raw)?,
         None => request.source.default_revision().to_string(),
@@ -504,6 +532,15 @@ fn build_task_from_request(
         return Ok(None);
     }
 
+    if state
+        .tasks_snapshot()
+        .iter()
+        .chain(created.iter())
+        .any(|task| util::task_paths_conflict(Path::new(&task.save_path), &paths.final_path))
+    {
+        return Err("目标文件已属于另一个来源或 revision 的任务，请选择其他下载目录，或先清理冲突的任务记录".to_string());
+    }
+
     // v0.2.0：分段任务的 .part 已预分配为 total 长度，用元数据 chunks 计算已下载量。
     let progress = read_part_progress(&paths.part_path, &paths.meta_path);
     let total_size = if request.size > 0 {
@@ -521,6 +558,7 @@ fn build_task_from_request(
     *now = now.saturating_add(1); // 保证同毫秒入队仍保持 FIFO
     let added_at = *now;
     Ok(Some(DownloadTask {
+        update_seq: 0,
         task_id: uuid::Uuid::new_v4().to_string(),
         source: request.source,
         repo_id,
@@ -548,7 +586,11 @@ fn build_task_from_request(
         retries: 0,
         revision,
         added_at,
-        completed_at: if already_completed { Some(added_at) } else { None },
+        completed_at: if already_completed {
+            Some(added_at)
+        } else {
+            None
+        },
         etag: progress.etag,
         last_modified: progress.last_modified,
     }))
@@ -614,11 +656,7 @@ pub fn resume_task(
     let part_length = read_part_progress(Path::new(&task.temp_path), &meta_path).downloaded;
     match state.transition_task(
         task_id,
-        &[
-            TaskStatus::Paused,
-            TaskStatus::Error,
-            TaskStatus::Cancelled,
-        ],
+        &[TaskStatus::Paused, TaskStatus::Error, TaskStatus::Cancelled],
         |task| {
             task.status = TaskStatus::Queued;
             task.error = None;
@@ -648,7 +686,12 @@ pub fn pause_all(state: &Arc<AppState>, sink: &dyn EventSink) {
     let task_ids: Vec<String> = state
         .tasks_snapshot()
         .into_iter()
-        .filter(|task| matches!(task.status, TaskStatus::Active | TaskStatus::Pausing | TaskStatus::Queued))
+        .filter(|task| {
+            matches!(
+                task.status,
+                TaskStatus::Active | TaskStatus::Pausing | TaskStatus::Queued
+            )
+        })
         .map(|task| task.task_id)
         .collect();
     for task_id in task_ids {
@@ -705,15 +748,10 @@ pub fn cancel_task(
         }
         TaskStatus::Queued | TaskStatus::Paused | TaskStatus::Error => {
             let meta_path = util::with_suffix(Path::new(&task.temp_path), ".json");
-            let part_length =
-                read_part_progress(Path::new(&task.temp_path), &meta_path).downloaded;
+            let part_length = read_part_progress(Path::new(&task.temp_path), &meta_path).downloaded;
             match state.transition_task(
                 task_id,
-                &[
-                    TaskStatus::Queued,
-                    TaskStatus::Paused,
-                    TaskStatus::Error,
-                ],
+                &[TaskStatus::Queued, TaskStatus::Paused, TaskStatus::Error],
                 |task| {
                     task.status = TaskStatus::Cancelled;
                     task.downloaded = part_length;
@@ -746,7 +784,11 @@ pub fn cancel_task(
 }
 
 /// 命令 10：重试失败任务（error → queued，保留已下载字节；CAS）。
-pub fn retry_task(state: &Arc<AppState>, sink: &dyn EventSink, task_id: &str) -> Result<(), String> {
+pub fn retry_task(
+    state: &Arc<AppState>,
+    sink: &dyn EventSink,
+    task_id: &str,
+) -> Result<(), String> {
     match state.transition_task(task_id, &[TaskStatus::Error], |task| {
         task.status = TaskStatus::Queued;
         task.error = None;
@@ -891,12 +933,8 @@ mod tests {
         assert_eq!(sink.count("task-updated"), 2);
         assert_eq!(state.tasks_snapshot().len(), 2);
 
-        let again = start_downloads(
-            &state,
-            vec![sample_request(&models, "a.bin", 100)],
-            &sink,
-        )
-        .unwrap();
+        let again =
+            start_downloads(&state, vec![sample_request(&models, "a.bin", 100)], &sink).unwrap();
         assert!(again.is_empty(), "已有同路径任务时应复用而不是新建");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -906,7 +944,8 @@ mod tests {
         let (state, dir) = sample_state(true);
         let sink = RecordingSink::default();
         let models = dir.join("models");
-        let created = start_downloads(&state, vec![sample_request(&models, "w.bin", 10)], &sink).unwrap();
+        let created =
+            start_downloads(&state, vec![sample_request(&models, "w.bin", 10)], &sink).unwrap();
         let task_id = created[0].task_id.clone();
 
         // queued → paused → queued
@@ -920,7 +959,10 @@ mod tests {
 
         // queued → cancelled（终态）
         cancel_task(&state, &sink, &task_id, true).unwrap();
-        assert_eq!(state.get_task(&task_id).unwrap().status, TaskStatus::Cancelled);
+        assert_eq!(
+            state.get_task(&task_id).unwrap().status,
+            TaskStatus::Cancelled
+        );
 
         // 终态可删除记录，并发出 tasks-removed
         remove_tasks(&state, &sink, &[task_id.clone()]).unwrap();
@@ -938,7 +980,8 @@ mod tests {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, [1u8, 2, 3, 4]).unwrap();
 
-        let created = start_downloads(&state, vec![sample_request(&models, "done.bin", 4)], &sink).unwrap();
+        let created =
+            start_downloads(&state, vec![sample_request(&models, "done.bin", 4)], &sink).unwrap();
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].status, TaskStatus::Completed);
         assert_eq!(created[0].downloaded, 4);
@@ -950,8 +993,8 @@ mod tests {
     fn make_active_task(state: &Arc<AppState>, dir: &Path, name: &str) -> String {
         let sink = RecordingSink::default();
         let models = dir.join("models");
-        let created = start_downloads(state, vec![sample_request(&models, name, 100)], &sink)
-            .unwrap();
+        let created =
+            start_downloads(state, vec![sample_request(&models, name, 100)], &sink).unwrap();
         let task_id = created[0].task_id.clone();
         let outcome = state.transition_task(&task_id, &[TaskStatus::Queued], |task| {
             task.status = TaskStatus::Active;
@@ -1064,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn dedupe_key_includes_source() {
+    fn distinct_sources_cannot_own_the_same_output() {
         let (state, dir) = sample_state(true);
         let sink = RecordingSink::default();
         let models = dir.join("models");
@@ -1072,12 +1115,8 @@ mod tests {
         let mut ms = sample_request(&models, "same.bin", 10);
         ms.source = crate::models::Source::Modelscope;
         let created = start_downloads(&state, vec![hf, ms], &sink).unwrap();
-        assert_eq!(
-            created.len(),
-            2,
-            "不同 source 的同名仓库/路径不应互相去重"
-        );
-        assert_eq!(state.tasks_snapshot().len(), 2);
+        assert_eq!(created.len(), 1, "不同来源不得同时写入相同目标");
+        assert_eq!(state.tasks_snapshot().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1086,13 +1125,22 @@ mod tests {
         let (state, dir) = sample_state(false);
         let now = util::now_millis();
         let make_task = |id: &str, status: TaskStatus| DownloadTask {
+            update_seq: 0,
             task_id: id.to_string(),
             source: crate::models::Source::Modelscope,
             repo_id: "org/model".to_string(),
             remote_path: "w.bin".to_string(),
             file_name: "w.bin".to_string(),
-            save_path: dir.join("models").join("org/model/w.bin").to_string_lossy().into_owned(),
-            temp_path: dir.join("models").join("org/model/w.bin.part").to_string_lossy().into_owned(),
+            save_path: dir
+                .join("models")
+                .join("org/model/w.bin")
+                .to_string_lossy()
+                .into_owned(),
+            temp_path: dir
+                .join("models")
+                .join("org/model/w.bin.part")
+                .to_string_lossy()
+                .into_owned(),
             total_size: 100,
             downloaded: 10,
             status,
@@ -1123,7 +1171,11 @@ mod tests {
         };
         assert_eq!(status("active"), TaskStatus::Paused);
         assert_eq!(status("pausing"), TaskStatus::Paused);
-        assert_eq!(status("queued"), TaskStatus::Paused, "autoResume=false 时 queued 应暂停");
+        assert_eq!(
+            status("queued"),
+            TaskStatus::Paused,
+            "autoResume=false 时 queued 应暂停"
+        );
         assert_eq!(status("completed"), TaskStatus::Completed);
 
         // autoResume=true 时 queued 保持 queued。
@@ -1155,12 +1207,8 @@ mod tests {
         assert_eq!(created[0].revision, "main");
 
         // 同 revision 重复 → 去重复用。
-        let duplicate = start_downloads(
-            &state,
-            vec![sample_request(&models, "same.bin", 10)],
-            &sink,
-        )
-        .unwrap();
+        let duplicate =
+            start_downloads(&state, vec![sample_request(&models, "same.bin", 10)], &sink).unwrap();
         assert!(duplicate.is_empty(), "同 revision 应复用");
 
         // 不同 revision → 允许创建第二个任务，且最终保存路径包含 revision 段。
@@ -1170,8 +1218,7 @@ mod tests {
         assert_eq!(dev_created.len(), 1, "不同 revision 不应互相去重");
         assert_eq!(dev_created[0].revision, "dev");
         assert!(
-            dev_created[0].save_path.contains("\\dev\\")
-                || dev_created[0].save_path.contains("/dev/"),
+            dev_created[0].save_path.contains(".mdm-revisions"),
             "非默认 revision 路径应包含 revision 段：{}",
             dev_created[0].save_path
         );
@@ -1188,13 +1235,20 @@ mod tests {
         let (state, dir) = sample_state(true);
         let now = util::now_millis();
         let mut task = DownloadTask {
+            update_seq: 0,
             task_id: "legacy".to_string(),
             source: crate::models::Source::Modelscope,
             repo_id: "org/model".to_string(),
             remote_path: "w.bin".to_string(),
             file_name: "w.bin".to_string(),
-            save_path: dir.join("models/org/model/w.bin").to_string_lossy().into_owned(),
-            temp_path: dir.join("models/org/model/w.bin.part").to_string_lossy().into_owned(),
+            save_path: dir
+                .join("models/org/model/w.bin")
+                .to_string_lossy()
+                .into_owned(),
+            temp_path: dir
+                .join("models/org/model/w.bin.part")
+                .to_string_lossy()
+                .into_owned(),
             total_size: 10,
             downloaded: 0,
             status: TaskStatus::Queued,

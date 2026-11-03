@@ -92,7 +92,10 @@ function initialPage(): PageKey {
 /* ------------------------------------------------------------------ */
 // 合并 / 状态防回退 / 进度自愈逻辑抽到纯函数模块（可 Node 单元测试）：
 // src/lib/taskMerge.ts；线上 v0.1.3 的「active 被过期 queued 响应覆盖」问题即在此修复。
-import { applyProgressToTask, mergeTaskLists } from '../lib/taskMerge'
+import { applyProgressToTask, mergeTaskLists, reconcileTaskSnapshot, type SnapshotMutation } from '../lib/taskMerge'
+
+let snapshotJournal: SnapshotMutation[] | null = null
+let snapshotSettings: Settings | null = null
 
 /**
  * v0.2.0：旧版 tasks.json / 后端未升级时任务可能缺少 `revision`，
@@ -335,16 +338,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.snapshotStatus === 'loading') return
     if (!force && state.snapshotStatus === 'ready') return
     set({ snapshotStatus: 'loading', snapshotError: null })
+    const journal: SnapshotMutation[] = []
+    snapshotJournal = journal
+    snapshotSettings = null
     try {
       const snapshot: AppSnapshot = await ipc.getSnapshot()
       // 快照请求期间可能已有事件到达：保留现有任务中更新的版本。
-      const merged = mergeTaskLists(
+      const merged = reconcileTaskSnapshot(
         snapshot.tasks.map(withDefaultRevision),
-        get().tasks.map(withDefaultRevision),
+        journal,
       )
       set({
         tasks: merged,
-        settings: withSettingsDefaults(snapshot.settings),
+        settings: withSettingsDefaults(snapshotSettings ?? snapshot.settings),
         appVersion: snapshot.appVersion,
         dataDir: snapshot.dataDir,
         defaultDownloadDir: snapshot.defaultDownloadDir,
@@ -354,6 +360,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     } catch (error) {
       set({ snapshotStatus: 'error', snapshotError: toErrorText(error) })
+    } finally {
+      snapshotJournal = null
+      snapshotSettings = null
     }
   },
 
@@ -386,16 +395,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         session.unlisten = unlisten
         set({ eventsStatus: 'ready' })
+        void get().loadSnapshot(true)
       })
       .catch((error: unknown) => {
         if (session.disposed) return
         set({ eventsStatus: 'error', eventsError: toErrorText(error) })
+        void get().loadSnapshot()
       })
 
     return () => disposeSession(session)
   },
 
   applyProgress: (progress) => {
+    snapshotJournal?.push({ kind: 'progress', progress })
     set((state) => {
       const index = state.tasks.findIndex((task) => task.taskId === progress.taskId)
       if (index === -1) return state
@@ -410,6 +422,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   upsertTask: (task) => {
     const normalized = withDefaultRevision(task)
+    snapshotJournal?.push({ kind: 'tasks', tasks: [normalized] })
     const previous = get().tasks
     const transitions = collectTransitions(previous, [normalized])
     set((state) => ({ tasks: mergeTaskLists(state.tasks, [normalized]) }))
@@ -418,6 +431,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   upsertTasks: (tasks) => {
     const normalized = tasks.map(withDefaultRevision)
+    snapshotJournal?.push({ kind: 'tasks', tasks: normalized })
     const previous = get().tasks
     const transitions = collectTransitions(previous, normalized)
     set((state) => ({ tasks: mergeTaskLists(state.tasks, normalized) }))
@@ -425,6 +439,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeTasks: (taskIds) => {
+    snapshotJournal?.push({ kind: 'remove', ids: taskIds })
     if (taskIds.length === 0) return
     set((state) => {
       const removing = new Set(taskIds)
@@ -433,7 +448,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  setSettings: (settings) => set({ settings: withSettingsDefaults(settings) }),
+  setSettings: (settings) => {
+    if (snapshotJournal) snapshotSettings = settings
+    set({ settings: withSettingsDefaults(settings) })
+  },
 
   pushToast: (kind, title, description, action) => {
     set((state) => ({

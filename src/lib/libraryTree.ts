@@ -9,6 +9,7 @@
  */
 
 import type { FileKind, LocalFile } from '../types'
+import { normalizeDownloadDir } from './downloadPaths'
 
 export interface LibraryFileEntry extends LocalFile {
   /** 相对所属扫描根的路径（使用 `/` 分隔）；「其他位置」下为规范化后的绝对路径 */
@@ -77,9 +78,9 @@ export function relativePathOf(filePath: string, baseDir: string): string | null
 
 /** 相对路径 → 绝对路径（打开目录用，Windows 反斜杠格式）。 */
 export function absolutePathOf(baseDir: string, relativePath: string): string {
-  const base = baseDir.replace(/[\\/]+$/, '')
+  const base = normalizeDownloadDir(baseDir)
   if (!relativePath) return base
-  return `${base}\\${relativePath.replace(/\//g, '\\')}`
+  return `${base.replace(/[\\/]+$/, '')}\\${relativePath.replace(/\//g, '\\')}`
 }
 
 /** 规范化 + 去重扫描根（忽略大小写重复、去尾部斜杠、保持原顺序）。 */
@@ -88,7 +89,7 @@ export function normalizeRootDirs(roots: string[]): string[] {
   const result: string[] = []
   for (const raw of roots) {
     if (typeof raw !== 'string') continue
-    const root = raw.trim().replace(/[\\/]+$/, '')
+    const root = normalizeDownloadDir(raw)
     if (!root) continue
     const key = normalizeSlashes(root).toLowerCase()
     if (seen.has(key)) continue

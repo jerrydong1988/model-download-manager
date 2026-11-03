@@ -219,6 +219,9 @@ pub struct RepoDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
+    /// Per-process mutation sequence; persisted values reset at startup.
+    #[serde(default)]
+    pub update_seq: u64,
     pub task_id: String,
     pub source: Source,
     pub repo_id: String,

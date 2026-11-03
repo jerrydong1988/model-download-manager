@@ -1,7 +1,7 @@
 {
   "name": "model-download-manager",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "ModelScope / HuggingFace 模型下载管理器",
   "scripts": {
@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "check:types": "tsc --noEmit",
     "check:public": "node scripts/check-public-content.mjs",
-    "test:frontend": "node --test tests/frontend/task-merge.test.ts",
+    "test:frontend": "node --test tests/frontend/*.test.ts",
     "check:ui": "node scripts/check-contrast.mjs && node scripts/check-ui-rules.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

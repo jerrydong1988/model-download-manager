@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import type { FileKind, LocalFile } from '../types'
+import { normalizeDownloadDir } from '../lib/downloadPaths'
 import {
   allExpandedPaths,
   buildLibraryTree,
@@ -326,7 +327,7 @@ export default function LibraryPage() {
     try {
       const picked = await pickDirectory(downloadDir)
       if (!picked) return
-      const normalized = picked.trim().replace(/[\\/]+$/, '')
+      const normalized = normalizeDownloadDir(picked)
       if (!normalized) return
       const duplicates = configuredRoots.some(
         (root) => normalizeSlashes(root).toLowerCase() === normalizeSlashes(normalized).toLowerCase(),

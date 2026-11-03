@@ -124,6 +124,7 @@ mod tests {
 
     fn sample_task(save_path: &str) -> DownloadTask {
         DownloadTask {
+            update_seq: 0,
             task_id: "t1".to_string(),
             source: Source::Huggingface,
             repo_id: "org/model".to_string(),
@@ -205,9 +206,15 @@ mod tests {
 
         let files = scan_library(&[root_a.clone(), root_b.clone()], &[]);
         assert_eq!(files.len(), 3, "应扫描多个根");
-        let from_a = files.iter().find(|file| file.name == "from-a.safetensors").unwrap();
+        let from_a = files
+            .iter()
+            .find(|file| file.name == "from-a.safetensors")
+            .unwrap();
         assert_eq!(from_a.root_dir, root_a.to_string_lossy());
-        let from_b = files.iter().find(|file| file.name == "from-b.gguf").unwrap();
+        let from_b = files
+            .iter()
+            .find(|file| file.name == "from-b.gguf")
+            .unwrap();
         assert_eq!(from_b.root_dir, root_b.to_string_lossy());
         assert!(files.iter().any(|file| file.name == "deep.bin"));
 

@@ -32,6 +32,7 @@ import {
   toErrorText,
 } from '../lib/ipc'
 import { SOURCE_LABEL } from '../lib/labels'
+import { normalizeDownloadDir } from '../lib/downloadPaths'
 import { applyThemeSetting } from '../lib/theme'
 import { useAppStore } from '../store/appStore'
 import { APP_REFRESH_PAGE_EVENT } from '../components/layout/useGlobalShortcuts'
@@ -113,7 +114,7 @@ function validateDraft(
 
   const cleaned: Settings = {
     ...draft,
-    downloadDir: downloadDir.replace(/[\\/]+$/, ''),
+    downloadDir: normalizeDownloadDir(downloadDir),
     hfToken: draft.hfToken.trim(),
     msToken: draft.msToken.trim(),
     hfEndpoint: draft.hfEndpoint.trim().replace(/\/+$/, ''),

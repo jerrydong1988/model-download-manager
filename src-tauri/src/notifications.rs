@@ -75,6 +75,7 @@ mod tests {
 
     fn sample_task() -> DownloadTask {
         DownloadTask {
+            update_seq: 0,
             task_id: "t1".to_string(),
             source: Source::Huggingface,
             repo_id: "org/model".to_string(),

@@ -3,9 +3,11 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::models::{RepoDetail, RepoFile, RepoSearchPage, RepoSummary, SearchQuery, Settings, Source};
+use crate::models::{
+    RepoDetail, RepoFile, RepoSearchPage, RepoSummary, SearchQuery, Settings, Source,
+};
 use crate::sources::{
-    endpoint, encode_path, map_network_error, parse_next_link, send_json, url_with_query,
+    encode_path, endpoint, map_network_error, parse_next_link, send_json, url_with_query,
     validate_api_next_url, with_auth,
 };
 use crate::util;
@@ -110,12 +112,12 @@ pub async fn search(
         .send()
         .await
         .map_err(|e| map_network_error("搜索仓库", e))?;
-    let next_cursor =
-        parse_next_link(response.headers()).and_then(|n| validate_api_next_url(&n, endpoint(settings, SOURCE)));
+    let next_cursor = parse_next_link(response.headers())
+        .and_then(|n| validate_api_next_url(&n, endpoint(settings, SOURCE)));
     let body = send_json(SOURCE, "搜索仓库", response).await?;
 
-    let repos: Vec<HfRepoSummary> = serde_json::from_value(body)
-        .map_err(|e| format!("搜索仓库：响应格式异常（{e}）"))?;
+    let repos: Vec<HfRepoSummary> =
+        serde_json::from_value(body).map_err(|e| format!("搜索仓库：响应格式异常（{e}）"))?;
 
     let items = repos
         .into_iter()
@@ -148,7 +150,7 @@ pub async fn detail(
 ) -> Result<RepoDetail, String> {
     let repo = util::sanitize_repo_id(repo_id)?;
     let revision = match revision.map(str::trim).filter(|r| !r.is_empty()) {
-        Some(revision) => util::sanitize_segment(revision)?,
+        Some(revision) => util::sanitize_revision(revision)?,
         None => SOURCE.default_revision().to_string(),
     };
     let base = endpoint(settings, SOURCE);
@@ -157,7 +159,7 @@ pub async fn detail(
     let first_url = format!(
         "{base}/api/models/{}/tree/{}?recursive=true",
         encode_path(&repo),
-        encode_path(&revision)
+        crate::sources::encode_revision(&revision)
     );
     let mut files = Vec::new();
     let mut next = Some(first_url);
@@ -182,10 +184,7 @@ pub async fn detail(
             if entry.entry_type != "file" || entry.path.is_empty() {
                 continue;
             }
-            let size = entry
-                .lfs
-                .and_then(|lfs| lfs.size)
-                .unwrap_or(entry.size);
+            let size = entry.lfs.and_then(|lfs| lfs.size).unwrap_or(entry.size);
             let name = entry
                 .path
                 .rsplit('/')
@@ -204,7 +203,9 @@ pub async fn detail(
     }
 
     let total_size = files.iter().map(|file| file.size).sum();
-    let info = fetch_repo_info(client, settings, &repo).await.unwrap_or_default();
+    let info = fetch_repo_info(client, settings, &repo)
+        .await
+        .unwrap_or_default();
     let license = info
         .card_data
         .as_ref()
@@ -232,7 +233,11 @@ async fn fetch_repo_info(
     settings: &Settings,
     repo: &str,
 ) -> Option<HfRepoInfo> {
-    let url = format!("{}/api/models/{}", endpoint(settings, SOURCE), encode_path(repo));
+    let url = format!(
+        "{}/api/models/{}",
+        endpoint(settings, SOURCE),
+        encode_path(repo)
+    );
     let response = with_auth(client.get(url), settings, SOURCE)
         .send()
         .await
@@ -258,10 +263,9 @@ pub(crate) fn parse_refs(value: &Value) -> (Vec<String>, Vec<String>) {
                     .iter()
                     .filter_map(|item| match item {
                         Value::String(name) => Some(name.clone()),
-                        Value::Object(_) => item
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
+                        Value::Object(_) => {
+                            item.get("name").and_then(Value::as_str).map(str::to_string)
+                        }
                         _ => None,
                     })
                     .filter(|name| !name.trim().is_empty())
@@ -269,10 +273,7 @@ pub(crate) fn parse_refs(value: &Value) -> (Vec<String>, Vec<String>) {
             })
             .unwrap_or_default()
     }
-    (
-        names(value.get("branches")),
-        names(value.get("tags")),
-    )
+    (names(value.get("branches")), names(value.get("tags")))
 }
 
 /// `GET {hf}/api/models/{repo}/refs` → 分支/标签；失败降级为空数组（UI 可自定义 revision）。
@@ -387,7 +388,10 @@ mod tests {
             cursor: None,
         };
         let url = build_search_url(&settings, &query).unwrap();
-        assert!(url.starts_with("https://hf-mirror.com/api/models?"), "url={url}");
+        assert!(
+            url.starts_with("https://hf-mirror.com/api/models?"),
+            "url={url}"
+        );
         assert!(url.contains("full=true"), "缺少 full=true：{url}");
         assert!(url.contains("search=Qwen"), "url={url}");
         assert!(url.contains("limit=20"), "url={url}");
@@ -457,7 +461,7 @@ mod tests {
         );
         assert_eq!(
             url,
-            "https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/resolve/refs/pr/3/config.json"
+            "https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/resolve/refs%2Fpr%2F3/config.json"
         );
     }
 }

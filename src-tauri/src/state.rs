@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,11 @@ use tokio::sync::Notify;
 
 use crate::models::{DownloadTask, Settings, Source, TaskStatus};
 use crate::util::{self, BandwidthLimiter};
+
+fn next_task_sequence() -> u64 {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    SEQUENCE.fetch_add(1, Ordering::SeqCst) + 1
+}
 
 /// `tasks.json` 持久化格式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +57,13 @@ pub struct TaskControl {
 }
 
 impl TaskControl {
+    /// Poll flags while an HTTP read, request, or limiter is awaiting; all workers see the flags.
+    pub async fn stopped(&self) {
+        while !self.is_cancelled() && !self.is_paused() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -66,8 +78,7 @@ impl TaskControl {
 
     /// 置取消标志；`delete_partial` 决定下载循环退出后是否清理临时文件。
     pub fn cancel(&self, delete_partial: bool) {
-        self.delete_partial
-            .store(delete_partial, Ordering::SeqCst);
+        self.delete_partial.store(delete_partial, Ordering::SeqCst);
         self.cancelled.store(true, Ordering::SeqCst);
     }
 
@@ -88,6 +99,8 @@ impl TaskControl {
 
 /// 全局应用状态（`tauri::Builder::manage` 注册）。
 pub struct AppState {
+    /// Serialize enqueue validation and insertion, including physical output-path ownership.
+    pub enqueue_lock: Mutex<()>,
     /// 应用数据目录（settings.json / tasks.json 所在）。
     pub data_dir: PathBuf,
     settings: RwLock<Settings>,
@@ -115,6 +128,7 @@ impl AppState {
         });
         let limiter = Arc::new(BandwidthLimiter::new(settings.bandwidth_limit));
         Self {
+            enqueue_lock: Mutex::new(()),
             data_dir,
             settings: RwLock::new(settings),
             tasks: Mutex::new(Vec::new()),
@@ -249,6 +263,7 @@ impl AppState {
             let mut guard = self.tasks_guard();
             let task = guard.iter_mut().find(|task| task.task_id == task_id)?;
             update(task);
+            task.update_seq = next_task_sequence();
             task.clone()
         };
         self.mark_dirty(false);
@@ -277,6 +292,7 @@ impl AppState {
                         TransitionOutcome::Conflict(task.clone())
                     } else {
                         update(task);
+                        task.update_seq = next_task_sequence();
                         TransitionOutcome::Updated(task.clone())
                     }
                 }
@@ -415,6 +431,7 @@ impl AppState {
 
         let auto_resume = self.current_settings().auto_resume;
         for task in &mut tasks {
+            task.update_seq = 0;
             task.speed = 0;
             match task.status {
                 crate::models::TaskStatus::Active | crate::models::TaskStatus::Pausing => {
@@ -447,17 +464,11 @@ fn quarantine_corrupt_tasks_file(path: &std::path::Path) -> Option<PathBuf> {
     let target = parent.join(format!("tasks.corrupt-{}.json", util::now_millis()));
     match std::fs::rename(path, &target) {
         Ok(()) => {
-            eprintln!(
-                "警告：损坏的任务文件已隔离为：{}",
-                target.display()
-            );
+            eprintln!("警告：损坏的任务文件已隔离为：{}", target.display());
             Some(target)
         }
         Err(err) => {
-            eprintln!(
-                "警告：无法隔离损坏的任务文件（{err}）：{}",
-                path.display()
-            );
+            eprintln!("警告：无法隔离损坏的任务文件（{err}）：{}", path.display());
             None
         }
     }
@@ -491,6 +502,7 @@ mod tests {
 
     fn sample_task(status: TaskStatus) -> DownloadTask {
         DownloadTask {
+            update_seq: 0,
             task_id: "t1".to_string(),
             source: Source::Huggingface,
             repo_id: "org/model".to_string(),

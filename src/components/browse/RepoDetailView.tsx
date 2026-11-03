@@ -26,6 +26,7 @@ import {
 } from '../../lib/ipc'
 import { defaultRevisionFor, formatBytes } from '../../lib/format'
 import { isTerminalStatus } from '../../lib/labels'
+import { taskMatchesDestination } from '../../lib/downloadPaths'
 import { useAppStore } from '../../store/appStore'
 import { cx } from '../../lib/cx'
 import {
@@ -58,10 +59,12 @@ function findTask(
   source: RepoSummary['source'],
   repoId: string,
   remotePath: string,
+  revision: string,
+  saveDir: string,
 ): DownloadTask | undefined {
   return tasks.find(
     (task) =>
-      task.source === source && task.repoId === repoId && task.remotePath === remotePath,
+      task.remotePath === remotePath && taskMatchesDestination(task, source, repoId, revision, saveDir),
   )
 }
 
@@ -97,14 +100,19 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   const detailRef = useRef<RepoDetail | null>(null)
   const revisionRef = useRef(revision)
   revisionRef.current = revision
+  const saveDirRef = useRef(saveDir)
+  saveDirRef.current = saveDir
+  const detailRequestSeq = useRef(0)
 
   const loadDetail = useCallback(
     async (targetRevision: string): Promise<boolean> => {
+      const seq = ++detailRequestSeq.current
       if (detailRef.current) setSwitchingRevision(true)
       else setStatus('loading')
       setError('')
       try {
         const result = await getRepoDetail(repo.source, repo.id, targetRevision)
+        if (seq !== detailRequestSeq.current) return false
         detailRef.current = result
         setDetail(result)
         setStatus('ready')
@@ -113,18 +121,20 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
         const nextSelected = new Set<string>()
         for (const file of result.files) {
           if (file.kind !== 'weight' && file.kind !== 'mmproj') continue
-          const task = findTask(existing, repo.source, repo.id, file.path)
+          const task = findTask(existing, repo.source, repo.id, file.path, result.revision,
+            saveDirRef.current || useAppStore.getState().settings?.downloadDir || '')
           if (task && (task.status === 'completed' || !isTerminalStatus(task.status))) continue
           nextSelected.add(file.path)
         }
         setSelected(nextSelected)
         return true
       } catch (err) {
+        if (seq !== detailRequestSeq.current) return false
         setStatus('error')
         setError(toErrorText(err))
         return false
       } finally {
-        setSwitchingRevision(false)
+        if (seq === detailRequestSeq.current) setSwitchingRevision(false)
       }
     },
     [repo.id, repo.source],
@@ -201,12 +211,12 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   const taskMap = useMemo(() => {
     const map = new Map<string, DownloadTask>()
     for (const task of tasks) {
-      if (task.source === repo.source && task.repoId === repo.id) {
+      if (taskMatchesDestination(task, repo.source, repo.id, revision, saveDir)) {
         map.set(task.remotePath, task)
       }
     }
     return map
-  }, [repo.id, repo.source, tasks])
+  }, [repo.id, repo.source, tasks, revision, saveDir])
 
   const resolveState = useCallback(
     (file: RepoFile): FileStateInfo | null => {
@@ -315,7 +325,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   }
 
   const handleStart = async () => {
-    if (!detail || selection.files.length === 0) return
+    if (!detail || switchingRevision || detail.revision !== revision || selection.files.length === 0) return
     if (!saveDir.trim()) {
       pushToast('error', '请先选择下载目录')
       return
@@ -338,7 +348,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
         pushToast(
           'success',
           `已加入下载队列：${created.length} 个文件`,
-          skipped > 0 ? `另有 ${skipped} 个文件已在队列或已下载，已自动跳过。` : undefined,
+          skipped > 0 ? `另有 ${skipped} 个文件未新建任务（已有记录、无效请求或保存路径冲突）。` : undefined,
         )
         setSelected(new Set())
       } else {
@@ -577,7 +587,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                 </span>
                 <Button
                   variant="primary"
-                  disabled={selection.files.length === 0}
+                  disabled={switchingRevision || detail.revision !== revision || selection.files.length === 0}
                   loading={starting}
                   onClick={() => void handleStart()}
                   leftIcon={<Download className="h-4 w-4" />}

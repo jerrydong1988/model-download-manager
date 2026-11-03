@@ -17,7 +17,9 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use model_download_manager_lib::download::{transfer, transfer_auto, TransferContext, TransferOutcome};
+use model_download_manager_lib::download::{
+    transfer, transfer_auto, TransferContext, TransferOutcome,
+};
 use model_download_manager_lib::models::Source;
 use model_download_manager_lib::state::TaskControl;
 use model_download_manager_lib::util::{self, BandwidthLimiter, EventSink, NoopSink};
@@ -137,7 +139,8 @@ where
                         if name.eq_ignore_ascii_case("range") {
                             if let Some(rest) = value.trim().strip_prefix("bytes=") {
                                 let mut bounds = rest.split('-');
-                                range_start = bounds.next().and_then(|start| start.parse::<u64>().ok());
+                                range_start =
+                                    bounds.next().and_then(|start| start.parse::<u64>().ok());
                                 range_end = bounds.next().and_then(|end| end.parse::<u64>().ok());
                             }
                         }
@@ -275,12 +278,7 @@ async fn resumes_after_mid_stream_disconnect() {
         match request.range_start {
             Some(start) => {
                 let start = start as usize;
-                MockResponse::new(
-                    206,
-                    "Partial Content",
-                    full[start..].to_vec(),
-                )
-                .header(
+                MockResponse::new(206, "Partial Content", full[start..].to_vec()).header(
                     "Content-Range",
                     &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
                 )
@@ -290,14 +288,24 @@ async fn resumes_after_mid_stream_disconnect() {
     })
     .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), 0, 2);
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        0,
+        2,
+    );
     let outcome = run_transfer(ctx).await.expect("应成功续传完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
     ));
     assert_eq!(read_final(&dir), full, "续传后最终内容应与源一致");
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "应经历 1 次中断 + 1 次续传");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        2,
+        "应经历 1 次中断 + 1 次续传"
+    );
     // 临时文件与断点元数据应被清理。
     assert!(!dir.join("model.safetensors.part").exists());
     assert!(!dir.join("model.safetensors.part.json").exists());
@@ -307,6 +315,7 @@ async fn resumes_after_mid_stream_disconnect() {
 #[tokio::test]
 async fn handles_modelscope_style_200_with_content_range() {
     let dir = unique_dir("ms-200-cr");
+    seed_legacy_meta(&dir, 0);
     let full = content();
     // 预埋 300 字节 part，模拟上次中断。
     std::fs::write(dir.join("model.safetensors.part"), &full[..300]).unwrap();
@@ -323,13 +332,25 @@ async fn handles_modelscope_style_200_with_content_range() {
     })
     .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), 0, 2);
-    let outcome = run_transfer(ctx).await.expect("200+Content-Range 应视为续传成功");
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        0,
+        2,
+    );
+    let outcome = run_transfer(ctx)
+        .await
+        .expect("200+Content-Range 应视为续传成功");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
     ));
-    assert_eq!(read_final(&dir), full, "不能因 200 而截断重写，内容必须完整");
+    assert_eq!(
+        read_final(&dir),
+        full,
+        "不能因 200 而截断重写，内容必须完整"
+    );
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -346,7 +367,13 @@ async fn falls_back_to_full_download_when_server_ignores_range() {
     })
     .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), TOTAL as u64, 2);
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        TOTAL as u64,
+        2,
+    );
     let outcome = run_transfer(ctx).await.expect("应能从头重下");
     assert!(matches!(
         outcome,
@@ -360,6 +387,7 @@ async fn falls_back_to_full_download_when_server_ignores_range() {
 #[tokio::test]
 async fn treats_416_with_matching_total_as_complete() {
     let dir = unique_dir("416");
+    seed_legacy_meta(&dir, 0);
     let full = content();
     // part 已完整但任务 total 未知（列表中 size=0），因此仍会发 Range 请求。
     std::fs::write(dir.join("model.safetensors.part"), &full).unwrap();
@@ -371,8 +399,16 @@ async fn treats_416_with_matching_total_as_complete() {
     })
     .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), 0, 0);
-    let outcome = run_transfer(ctx).await.expect("416 且 total==part 长度应视为完成");
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        0,
+        0,
+    );
+    let outcome = run_transfer(ctx)
+        .await
+        .expect("416 且 total==part 长度应视为完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -390,13 +426,23 @@ async fn exhausts_retries_on_5xx() {
     })
     .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), TOTAL as u64, 1);
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        TOTAL as u64,
+        1,
+    );
     let error = run_transfer(ctx).await.expect_err("5xx 重试耗尽后应失败");
     assert!(
         error.contains("已重试 1 次"),
         "错误信息应说明重试次数，实际：{error}"
     );
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "maxRetries=1 → 共请求 2 次");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        2,
+        "maxRetries=1 → 共请求 2 次"
+    );
     assert!(!dir.join("model.safetensors").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -404,12 +450,17 @@ async fn exhausts_retries_on_5xx() {
 #[tokio::test]
 async fn does_not_retry_on_401() {
     let dir = unique_dir("401");
-    let (base, counter) = spawn_mock_server(|_index, _request| {
-        MockResponse::new(401, "Unauthorized", Vec::new())
-    })
-    .await;
+    let (base, counter) =
+        spawn_mock_server(|_index, _request| MockResponse::new(401, "Unauthorized", Vec::new()))
+            .await;
 
-    let ctx = build_context(&dir, format!("{base}/model.safetensors"), TaskControl::new(), TOTAL as u64, 3);
+    let ctx = build_context(
+        &dir,
+        format!("{base}/model.safetensors"),
+        TaskControl::new(),
+        TOTAL as u64,
+        3,
+    );
     let error = run_transfer(ctx).await.expect_err("401 不应重试");
     assert!(
         error.contains("授权") || error.contains("Token") || error.contains("HTTP 401"),
@@ -470,8 +521,14 @@ async fn pause_keeps_part_and_resume_finishes() {
     assert!(paused_downloaded > 0 && paused_downloaded < TOTAL as u64);
     assert_eq!(paused_total, TOTAL as u64);
     let part_length = std::fs::metadata(&part_path).unwrap().len();
-    assert_eq!(part_length, paused_downloaded, "暂停后 part 长度应等于报告进度");
-    assert!(dir.join("model.safetensors.part.json").exists(), "断点元数据应保留");
+    assert_eq!(
+        part_length, paused_downloaded,
+        "暂停后 part 长度应等于报告进度"
+    );
+    assert!(
+        dir.join("model.safetensors.part.json").exists(),
+        "断点元数据应保留"
+    );
 
     // 恢复：新的控制标志 + 同一 url，应带 Range 续传并完成。
     let resume_control = TaskControl::new();
@@ -515,6 +572,7 @@ async fn retry_counter_reports_two_retries_then_completes() {
     let state = Arc::new(AppState::new(settings, dir.join("appdata")));
     let save_path = dir.join("model.safetensors");
     state.insert_tasks(vec![DownloadTask {
+        update_seq: 0,
         task_id: "t1".to_string(),
         source: Source::Huggingface,
         repo_id: "org/model".to_string(),
@@ -557,7 +615,11 @@ async fn retry_counter_reports_two_retries_then_completes() {
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
     ));
-    assert_eq!(*seen.lock().unwrap(), vec![1, 2], "回调应报告累计重试次数 1、2");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![1, 2],
+        "回调应报告累计重试次数 1、2"
+    );
     assert_eq!(
         state.get_task("t1").unwrap().retries,
         2,
@@ -596,7 +658,9 @@ async fn discards_stale_part_longer_than_total() {
         TOTAL as u64,
         0,
     );
-    let outcome = run_transfer(ctx).await.expect("应丢弃超长 part 后重新下载完成");
+    let outcome = run_transfer(ctx)
+        .await
+        .expect("应丢弃超长 part 后重新下载完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -673,10 +737,7 @@ fn range_response(full: &[u8], request: &MockRequest) -> MockResponse {
                 "Partial Content",
                 full[start as usize..=end as usize].to_vec(),
             )
-            .header(
-                "Content-Range",
-                &format!("bytes {start}-{end}/{total}"),
-            )
+            .header("Content-Range", &format!("bytes {start}-{end}/{total}"))
         }
         _ => MockResponse::ok(full.to_vec()),
     }
@@ -743,10 +804,8 @@ async fn segmented_pause_keeps_chunks_and_resume_finishes() {
         0,
     );
 
-    let transfer_future = tokio::time::timeout(
-        Duration::from_secs(20),
-        transfer_auto(ctx, sink.as_ref()),
-    );
+    let transfer_future =
+        tokio::time::timeout(Duration::from_secs(20), transfer_auto(ctx, sink.as_ref()));
     let pause_future = async {
         loop {
             if sink.last_downloaded() > 0 {
@@ -775,17 +834,19 @@ async fn segmented_pause_keeps_chunks_and_resume_finishes() {
         TOTAL as u64,
         "分段任务 .part 应预分配为 total 长度"
     );
-    let meta: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(dir.join("model.safetensors.part.json")).unwrap(),
-    )
-    .unwrap();
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("model.safetensors.part.json")).unwrap())
+            .unwrap();
     let chunks_sum: u64 = meta["chunks"]
         .as_array()
         .unwrap()
         .iter()
         .map(|value| value.as_u64().unwrap())
         .sum();
-    assert_eq!(chunks_sum, paused_downloaded, "元数据 chunks 之和应等于暂停进度");
+    assert_eq!(
+        chunks_sum, paused_downloaded,
+        "元数据 chunks 之和应等于暂停进度"
+    );
 
     // 恢复（分段元数据存在 → 继续分段引擎）。
     let resume_ctx = build_auto_context(
@@ -809,6 +870,7 @@ async fn segmented_pause_keeps_chunks_and_resume_finishes() {
 #[tokio::test]
 async fn legacy_single_stream_part_is_converted_to_segments() {
     let dir = unique_dir("seg-legacy");
+    seed_legacy_meta(&dir, 0);
     let full = content();
     // 旧单流断点：连续前缀 300 字节，无分段元数据。
     std::fs::write(dir.join("model.safetensors.part"), &full[..300]).unwrap();
@@ -836,7 +898,9 @@ async fn legacy_single_stream_part_is_converted_to_segments() {
         Some(128),
         0,
     );
-    let outcome = run_transfer_auto(ctx).await.expect("旧单流断点应无损转换并完成");
+    let outcome = run_transfer_auto(ctx)
+        .await
+        .expect("旧单流断点应无损转换并完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -855,8 +919,8 @@ async fn legacy_single_stream_part_is_converted_to_segments() {
 async fn segmented_falls_back_to_single_stream_when_range_unsupported() {
     let dir = unique_dir("seg-fallback");
     let full = content();
-    let (base, counter) = spawn_mock_server(move |_index, _request| MockResponse::ok(content()))
-        .await;
+    let (base, counter) =
+        spawn_mock_server(move |_index, _request| MockResponse::ok(content())).await;
 
     let ctx = build_auto_context(
         &dir,
@@ -867,7 +931,9 @@ async fn segmented_falls_back_to_single_stream_when_range_unsupported() {
         Some(128),
         0,
     );
-    let outcome = run_transfer_auto(ctx).await.expect("不支持 Range 应回退单流完成");
+    let outcome = run_transfer_auto(ctx)
+        .await
+        .expect("不支持 Range 应回退单流完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -947,13 +1013,19 @@ async fn connections_one_uses_single_stream_engine() {
         Some(128),
         0,
     );
-    let outcome = run_transfer_auto(ctx).await.expect("connections=1 应走单流完成");
+    let outcome = run_transfer_auto(ctx)
+        .await
+        .expect("connections=1 应走单流完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
     ));
     assert_eq!(read_final(&dir), full);
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "单流引擎应只发起 1 次请求");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "单流引擎应只发起 1 次请求"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -961,8 +1033,8 @@ async fn connections_one_uses_single_stream_engine() {
 async fn unknown_total_falls_back_to_single_stream() {
     let dir = unique_dir("seg-unknown-total");
     let full = content();
-    let (base, counter) = spawn_mock_server(move |_index, _request| MockResponse::ok(content()))
-        .await;
+    let (base, counter) =
+        spawn_mock_server(move |_index, _request| MockResponse::ok(content())).await;
 
     let ctx = build_auto_context(
         &dir,
@@ -973,7 +1045,9 @@ async fn unknown_total_falls_back_to_single_stream() {
         Some(128),
         0,
     );
-    let outcome = run_transfer_auto(ctx).await.expect("total 未知应回退单流完成");
+    let outcome = run_transfer_auto(ctx)
+        .await
+        .expect("total 未知应回退单流完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -984,7 +1058,7 @@ async fn unknown_total_falls_back_to_single_stream() {
 }
 
 #[tokio::test]
-async fn legacy_single_stream_part_preserved_when_etag_mismatches() {
+async fn legacy_single_stream_part_restarts_when_etag_mismatches() {
     let dir = unique_dir("seg-legacy-etag");
     let full = content();
     // 旧版单流断点：连续前缀 300 字节 + 旧格式元数据（stale etag）。
@@ -1027,7 +1101,7 @@ async fn legacy_single_stream_part_preserved_when_etag_mismatches() {
     );
     let outcome = run_transfer_auto(ctx)
         .await
-        .expect("旧单流断点即使 etag 不一致也应保留并完成");
+        .expect("旧断点版本变化时应重下并完成");
     assert!(matches!(
         outcome,
         TransferOutcome::Completed { downloaded, .. } if downloaded == TOTAL as u64
@@ -1035,8 +1109,363 @@ async fn legacy_single_stream_part_preserved_when_etag_mismatches() {
     assert_eq!(read_final(&dir), full, "保留旧断点后内容必须完整");
     let recorded = ranges.lock().unwrap().clone();
     assert!(
-        recorded.iter().all(|(start, _)| *start >= 300),
-        "旧断点的 300 字节前缀必须保留，实际请求 {recorded:?}"
+        recorded.iter().any(|(start, _)| *start == 0),
+        "远端版本变化后必须重下首块，实际请求 {recorded:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn seed_legacy_meta(dir: &Path, total: u64) {
+    let meta = serde_json::json!({ "repoId": "org/model", "remotePath": "model.safetensors", "total": total });
+    util::atomic_write_json(&dir.join("model.safetensors.part.json"), &meta).unwrap();
+}
+
+#[tokio::test]
+async fn audit_limiter_can_consume_more_than_one_second_of_budget() {
+    let limiter = BandwidthLimiter::new(1024);
+    let result = tokio::time::timeout(Duration::from_millis(3500), limiter.acquire(2048)).await;
+    assert!(result.is_ok(), "2048 bytes at 1024 B/s should finish in about 2 s; it never can exceed the 1024-token capacity");
+}
+
+async fn audit_stalled_pause(connections: u32) {
+    let (url, _) = spawn_mock_server(move |_, request| {
+        let start = request.range_start.unwrap_or(0) as usize;
+        let end = request.range_end.unwrap_or((TOTAL - 1) as u64) as usize;
+        let body = content()[start..=end].to_vec();
+        let response = if request.range_start.is_some() {
+            MockResponse::new(206, "Partial Content", body)
+                .header("Content-Range", &format!("bytes {start}-{end}/{TOTAL}"))
+        } else {
+            MockResponse::ok(body)
+        };
+        // A valid response which sends its first byte and then stalls.
+        response.slow(1, 60_000)
+    })
+    .await;
+    let dir = unique_dir("audit-stalled");
+    let control = TaskControl::new();
+    let mut ctx = build_context(&dir, url, control.clone(), TOTAL as u64, 0);
+    ctx.connections = connections;
+    ctx.chunk_size_override = Some(250);
+    let part = ctx.part_path.clone();
+    let pause = async {
+        for _ in 0..100 {
+            if part.exists() && std::fs::metadata(&part).unwrap().len() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        control.set_paused(true);
+    };
+    let transfer =
+        async { tokio::time::timeout(Duration::from_secs(2), transfer_auto(ctx, &NoopSink)).await };
+    let (result, _) = tokio::join!(transfer, pause);
+    assert!(
+        matches!(result, Ok(Ok(TransferOutcome::Paused { .. }))),
+        "pause was not observed while awaiting the response body: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn audit_single_stream_pause_during_stalled_body() {
+    audit_stalled_pause(1).await;
+}
+
+#[tokio::test]
+async fn audit_segmented_pause_during_stalled_body() {
+    audit_stalled_pause(4).await;
+}
+
+#[tokio::test]
+async fn audit_segmented_rejects_changed_etag_between_ranges() {
+    let (url, _) = spawn_mock_server(|_, request| {
+        let start = request.range_start.unwrap() as usize;
+        let end = request.range_end.unwrap() as usize;
+        let (byte, etag) = if start == 0 {
+            (17, "\"v1\"")
+        } else {
+            (34, "\"v2\"")
+        };
+        MockResponse::new(206, "Partial Content", vec![byte; end - start + 1])
+            .header("Content-Range", &format!("bytes {start}-{end}/{TOTAL}"))
+            .header("ETag", etag)
+    })
+    .await;
+    let dir = unique_dir("audit-mixed-revisions");
+    let mut ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 0);
+    ctx.connections = 4;
+    ctx.chunk_size_override = Some(250);
+    let save = ctx.save_path.clone();
+    let result = transfer_auto(ctx, &NoopSink).await;
+    let mixed = save.exists() && {
+        let bytes = std::fs::read(&save).unwrap();
+        bytes.contains(&17) && bytes.contains(&34)
+    };
+    assert!(
+        result.is_err(),
+        "a changed ETag must stop segmented transfer: {result:?}"
+    );
+    assert!(
+        !mixed && !save.exists(),
+        "a mixed-version final file must never be published"
+    );
+}
+
+#[tokio::test]
+async fn audit_preallocated_part_without_metadata_is_not_completed() {
+    let (url, requests) = spawn_mock_server(|_, request| {
+        let start = request.range_start.unwrap_or(0) as usize;
+        let end = request.range_end.unwrap_or((TOTAL - 1) as u64) as usize;
+        MockResponse::new(206, "Partial Content", content()[start..=end].to_vec())
+            .header("Content-Range", &format!("bytes {start}-{end}/{TOTAL}"))
+    })
+    .await;
+    let dir = unique_dir("audit-preallocation-crash");
+    let mut ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 0);
+    ctx.connections = 4;
+    ctx.chunk_size_override = Some(250);
+    // State produced by segmented::attempt after set_len and before save_segmented_meta.
+    let file = std::fs::File::create(&ctx.part_path).unwrap();
+    file.set_len(TOTAL as u64).unwrap();
+    drop(file);
+    let save = ctx.save_path.clone();
+    let result = transfer_auto(ctx, &NoopSink).await.unwrap();
+    assert!(matches!(result, TransferOutcome::Completed { .. }));
+    assert!(
+        std::fs::read(save).unwrap() == content(),
+        "preallocated zeros were accepted after only {} probe request(s)",
+        requests.load(Ordering::SeqCst)
+    );
+}
+
+#[test]
+fn audit_distinct_sources_do_not_share_writable_output() {
+    use model_download_manager_lib::{
+        models::{DownloadRequest, Settings},
+        queue,
+        state::AppState,
+    };
+    let dir = unique_dir("audit-source-collision");
+    let mut settings = Settings::default();
+    settings.download_dir = dir.join("models").to_string_lossy().into_owned();
+    let state = Arc::new(AppState::new(settings.clone(), dir.join("data")));
+    let request = |source| DownloadRequest {
+        source,
+        repo_id: "org/model".into(),
+        remote_path: "model.bin".into(),
+        size: 1000,
+        save_dir: settings.download_dir.clone(),
+        revision: None,
+    };
+    let tasks = queue::start_downloads(
+        &state,
+        vec![request(Source::Huggingface), request(Source::Modelscope)],
+        &NoopSink,
+    )
+    .unwrap();
+    assert!(
+        !(tasks.len() == 2 && tasks[0].temp_path == tasks[1].temp_path),
+        "two runnable tasks share the exact same .part and .part.json: {:?}",
+        tasks
+            .iter()
+            .map(|t| (&t.source, &t.temp_path))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn audit_slash_revision_reaches_detail_api() {
+    use model_download_manager_lib::{models::Settings, sources};
+    let (url, _) = spawn_mock_server(|_, request| {
+        let body = if request.path.contains("/tree/") {
+            assert!(
+                request.path.contains("/tree/refs%2Fpr%2F3?"),
+                "{}",
+                request.path
+            );
+            "[]"
+        } else {
+            "{}"
+        };
+        MockResponse::ok(body.as_bytes().to_vec()).header("Content-Type", "application/json")
+    })
+    .await;
+    let mut settings = Settings::default();
+    settings.hf_endpoint = url;
+    let detail = sources::get_repo_detail(
+        &reqwest::Client::new(),
+        &settings,
+        Source::Huggingface,
+        "org/model",
+        Some("refs/pr/3"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(detail.revision, "refs/pr/3");
+    let url = sources::download_url(
+        &settings,
+        Source::Huggingface,
+        "org/model",
+        "refs/pr/3",
+        "file.bin",
+    );
+    assert!(url.ends_with("/resolve/refs%2Fpr%2F3/file.bin"));
+}
+
+#[tokio::test]
+async fn audit_socks_proxy_is_usable() {
+    use model_download_manager_lib::models::Settings;
+    let mut settings = Settings::default();
+    settings.proxy = "socks5://127.0.0.1:9".into();
+    let validated = model_download_manager_lib::settings::validate_proxy(&settings.proxy);
+    assert!(
+        validated.is_ok(),
+        "UI accepts SOCKS but backend rejects it: {validated:?}"
+    );
+    assert!(util::build_http_client(&settings).is_ok());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    settings.proxy = format!("socks5h://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut greeting = [0; 2];
+        socket.read_exact(&mut greeting).await.unwrap();
+        assert_eq!(greeting[0], 5);
+        let mut methods = vec![0; greeting[1] as usize];
+        socket.read_exact(&mut methods).await.unwrap();
+        socket.write_all(&[5, 0]).await.unwrap();
+        let mut connect = [0; 4];
+        socket.read_exact(&mut connect).await.unwrap();
+        assert_eq!(connect, [5, 1, 0, 3]);
+        let length = socket.read_u8().await.unwrap() as usize;
+        let mut destination = vec![0; length + 2];
+        socket.read_exact(&mut destination).await.unwrap();
+        assert_eq!(&destination[..length], b"model.invalid");
+        socket
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 80])
+            .await
+            .unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            request.push(socket.read_u8().await.unwrap());
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+    let client = util::build_http_client(&settings).unwrap();
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.get("http://model.invalid/model").send(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.text().await.unwrap(), "ok");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn audit_metadata_failure_stops_before_preallocation() {
+    let (url, _) = spawn_mock_server(|_, request| range_response(&content(), request)).await;
+    let dir = unique_dir("audit-meta-failure");
+    let mut ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 0);
+    ctx.connections = 4;
+    ctx.chunk_size_override = Some(250);
+    std::fs::create_dir(&ctx.meta_path).unwrap();
+    let part = ctx.part_path.clone();
+    let result = transfer_auto(ctx, &NoopSink).await;
+    assert!(result.is_err());
+    assert!(
+        !part.exists(),
+        "preallocation must not happen when sidecar commit fails"
+    );
+}
+
+#[tokio::test]
+async fn audit_cancel_interrupts_limiter_and_http_headers() {
+    let dir = unique_dir("audit-cancel-limiter");
+    let (url, _) = spawn_mock_server(|_, _| MockResponse::ok(content())).await;
+    let control = TaskControl::new();
+    let mut ctx = build_context(&dir, url, control.clone(), TOTAL as u64, 0);
+    ctx.limiter = Arc::new(BandwidthLimiter::new(1));
+    let cancel = async {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        control.cancel(false);
+    };
+    let download = tokio::time::timeout(Duration::from_secs(3), transfer(ctx, &NoopSink));
+    let (result, _) = tokio::join!(download, cancel);
+    assert!(matches!(result, Ok(Ok(TransferOutcome::Cancelled { .. }))));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/file", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let control = TaskControl::new();
+    let ctx = build_context(&dir, url, control.clone(), TOTAL as u64, 0);
+    let cancel = async {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        control.cancel(false);
+    };
+    let (result, _) = tokio::join!(
+        tokio::time::timeout(Duration::from_secs(3), transfer(ctx, &NoopSink)),
+        cancel
+    );
+    server.abort();
+    assert!(matches!(result, Ok(Ok(TransferOutcome::Cancelled { .. }))));
+}
+
+#[tokio::test]
+async fn audit_single_stream_rejects_changed_etag_after_disconnect() {
+    let (url, _) = spawn_mock_server(|index, request| {
+        if index == 0 {
+            MockResponse::ok(vec![17; TOTAL])
+                .header("ETag", "\"v1\"")
+                .truncated(250)
+                .slow(125, 10)
+        } else if let Some(start) = request.range_start {
+            let start = start as usize;
+            MockResponse::new(206, "Partial Content", vec![34; TOTAL - start])
+                .header(
+                    "Content-Range",
+                    &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
+                )
+                .header("ETag", "\"v2\"")
+        } else {
+            MockResponse::ok(vec![34; TOTAL]).header("ETag", "\"v2\"")
+        }
+    })
+    .await;
+    let dir = unique_dir("audit-single-mixed");
+    let ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 1);
+    let save = ctx.save_path.clone();
+    let result = transfer(ctx, &NoopSink).await;
+    let mixed = save.exists() && {
+        let bytes = std::fs::read(&save).unwrap();
+        bytes.contains(&17) && bytes.contains(&34)
+    };
+    assert!(
+        matches!(result, Ok(TransferOutcome::Completed { .. })),
+        "{result:?}"
+    );
+    assert!(!mixed);
+    assert_eq!(std::fs::read(save).unwrap(), vec![34; TOTAL]);
+}
+
+#[test]
+fn audit_revision_layout_does_not_collide_with_repo_subdirectory() {
+    let dir = unique_dir("audit-revision-paths");
+    let root = dir.to_string_lossy();
+    let main = util::build_task_paths_revision(&root, "org/model", "dev/model.bin", "main", "main")
+        .unwrap();
+    let dev =
+        util::build_task_paths_revision(&root, "org/model", "model.bin", "dev", "main").unwrap();
+    assert_ne!(
+        main.final_path, dev.final_path,
+        "main:dev/model.bin and dev:model.bin resolve to one file"
+    );
 }

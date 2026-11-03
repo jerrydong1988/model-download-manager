@@ -120,7 +120,8 @@ pub fn validate_and_clamp(mut settings: Settings) -> Result<Settings, String> {
         return Err(format!("下载目录必须是绝对路径：{dir}"));
     }
     settings.download_dir = dir;
-    settings.library_roots = normalize_library_roots(&settings.library_roots, &settings.download_dir);
+    settings.library_roots =
+        normalize_library_roots(&settings.library_roots, &settings.download_dir);
     std::fs::create_dir_all(&settings.download_dir)
         .map_err(|e| format!("无法创建下载目录 {}：{e}", settings.download_dir))?;
 
@@ -138,21 +139,18 @@ pub fn sanitize(mut settings: Settings) -> Result<Settings, String> {
     if !settings.proxy.is_empty() && validate_proxy(&settings.proxy).is_err() {
         settings.proxy = String::new();
     }
-    settings.hf_endpoint =
-        normalize_endpoint(&settings.hf_endpoint, "HuggingFace").unwrap_or_else(|_| {
-            DEFAULT_HF_ENDPOINT.to_string()
-        });
-    settings.ms_endpoint =
-        normalize_endpoint(&settings.ms_endpoint, "ModelScope").unwrap_or_else(|_| {
-            DEFAULT_MS_ENDPOINT.to_string()
-        });
+    settings.hf_endpoint = normalize_endpoint(&settings.hf_endpoint, "HuggingFace")
+        .unwrap_or_else(|_| DEFAULT_HF_ENDPOINT.to_string());
+    settings.ms_endpoint = normalize_endpoint(&settings.ms_endpoint, "ModelScope")
+        .unwrap_or_else(|_| DEFAULT_MS_ENDPOINT.to_string());
     let dir = settings.download_dir.trim().to_string();
     settings.download_dir = if dir.is_empty() || !is_absolute_dir(&dir) {
         default_download_dir()
     } else {
         dir
     };
-    settings.library_roots = normalize_library_roots(&settings.library_roots, &settings.download_dir);
+    settings.library_roots =
+        normalize_library_roots(&settings.library_roots, &settings.download_dir);
     let _ = std::fs::create_dir_all(&settings.download_dir);
     Ok(settings)
 }
@@ -178,7 +176,7 @@ pub fn normalize_library_roots(raw: &[String], download_dir: &str) -> Vec<String
         let normalized = trimmed
             .trim_end_matches(|character| character == '/' || character == '\\')
             .to_string();
-        let normalized = if normalized.is_empty() {
+        let normalized = if normalized.is_empty() || !is_absolute_dir(&normalized) {
             trimmed.to_string()
         } else {
             normalized
@@ -217,12 +215,12 @@ pub fn normalize_endpoint(raw: &str, label: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-/// 代理地址校验：必须是 `http://` 或 `https://`（可带认证信息）。
+/// HTTP/HTTPS/SOCKS5 代理（可带认证信息）。
 pub fn validate_proxy(proxy: &str) -> Result<(), String> {
     let trimmed = proxy.trim();
     let parsed = url::Url::parse(trimmed).map_err(|_| format!("代理地址无效：{trimmed}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("代理地址必须以 http:// 或 https:// 开头".to_string());
+    if !matches!(parsed.scheme(), "http" | "https" | "socks5" | "socks5h") {
+        return Err("代理地址必须以 http://、https://、socks5:// 或 socks5h:// 开头".to_string());
     }
     if parsed.host_str().map(str::is_empty).unwrap_or(true) {
         return Err(format!("代理地址缺少主机名：{trimmed}"));
@@ -347,7 +345,10 @@ mod tests {
         let mut s = Settings::default();
         s.download_dir = default_download_dir();
         s.connections_per_file = 99;
-        assert_eq!(validate_and_clamp(s.clone()).unwrap().connections_per_file, 8);
+        assert_eq!(
+            validate_and_clamp(s.clone()).unwrap().connections_per_file,
+            8
+        );
         s.connections_per_file = 0;
         assert_eq!(validate_and_clamp(s).unwrap().connections_per_file, 1);
     }
@@ -358,16 +359,19 @@ mod tests {
         let roots = normalize_library_roots(
             &[
                 "  D:\\Models  ".to_string(),
-                "D:\\Models".to_string(),          // 去重
-                "d:\\models".to_string(),          // 大小写不敏感去重
-                "relative\\path".to_string(),       // 非法（相对路径）忽略
-                "".to_string(),                     // 空忽略
-                "C:\\Models\\".to_string(),         // 与 downloadDir 重复忽略
-                "C:\\Models\\Nested".to_string(),   // 合法
+                "D:\\Models".to_string(),         // 去重
+                "d:\\models".to_string(),         // 大小写不敏感去重
+                "relative\\path".to_string(),     // 非法（相对路径）忽略
+                "".to_string(),                   // 空忽略
+                "C:\\Models\\".to_string(),       // 与 downloadDir 重复忽略
+                "C:\\Models\\Nested".to_string(), // 合法
             ],
             download,
         );
-        assert_eq!(roots, vec!["D:\\Models".to_string(), "C:\\Models\\Nested".to_string()]);
+        assert_eq!(
+            roots,
+            vec!["D:\\Models".to_string(), "C:\\Models\\Nested".to_string()]
+        );
 
         // 超过 8 个时截断。
         let many: Vec<String> = (0..12).map(|index| format!("D:\\root-{index}")).collect();
@@ -378,8 +382,14 @@ mod tests {
     fn legacy_settings_json_defaults_new_v020_fields() {
         let legacy = r#"{"downloadDir":"C:\\Models","concurrency":5}"#;
         let settings: Settings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(settings.connections_per_file, 4, "缺失 connectionsPerFile 用默认 4");
-        assert!(settings.library_roots.is_empty(), "缺失 libraryRoots 用默认空数组");
+        assert_eq!(
+            settings.connections_per_file, 4,
+            "缺失 connectionsPerFile 用默认 4"
+        );
+        assert!(
+            settings.library_roots.is_empty(),
+            "缺失 libraryRoots 用默认空数组"
+        );
         let json = serde_json::to_value(&settings).unwrap();
         assert_eq!(json["connectionsPerFile"], 4);
         assert_eq!(json["libraryRoots"], serde_json::json!([]));

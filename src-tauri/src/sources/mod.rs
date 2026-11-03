@@ -29,12 +29,19 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b'[')
     .add(b']');
 
+const REVISION_SEGMENT: &AsciiSet = &PATH_SEGMENT.add(b'/');
+
 /// 将仓库内路径按 `/` 分段做百分号转义（保留分隔符）。
 pub fn encode_path(path: &str) -> String {
     path.split('/')
         .map(|segment| utf8_percent_encode(segment, PATH_SEGMENT).to_string())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A revision is one route parameter, even when its name contains '/'.
+pub fn encode_revision(revision: &str) -> String {
+    utf8_percent_encode(revision, REVISION_SEGMENT).to_string()
 }
 
 /// 当前设置下某数据源的端点（已去除尾部 `/`）。
@@ -92,7 +99,7 @@ pub fn download_url(
 ) -> String {
     let base = endpoint(settings, source);
     let repo = encode_path(repo_id);
-    let revision = encode_path(revision);
+    let revision = encode_revision(revision);
     let remote = encode_path(remote_path);
     match source {
         Source::Huggingface => format!("{base}/{repo}/resolve/{revision}/{remote}"),

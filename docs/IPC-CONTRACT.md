@@ -138,6 +138,7 @@ interface RepoDetail {
 
 ```ts
 interface DownloadTask {
+  updateSeq?: number         // v0.2.1：进程内单调更新序号，旧任务启动时重置为 0
   taskId: string
   source: Source
   repoId: string
@@ -251,7 +252,7 @@ interface RevisionList {
 
 | 事件 | payload | 时机 |
 |------|---------|------|
-| `download-progress` | `{ taskId, downloaded, totalSize, speed }` | 下载中，每任务限流 ≤ 4 次/秒 |
+| `download-progress` | `{ taskId, downloaded, totalSize, speed, updateSeq? }` | 下载中，每任务限流 ≤ 4 次/秒 |
 | `task-updated` | `{ task: DownloadTask }` | 任务状态/元数据变化（入队、开始、暂停、完成、失败、取消） |
 | `tasks-removed` | `{ taskIds: string[] }` | `remove_tasks`/`clear_finished` 后 |
 | `settings-updated` | `{ settings: Settings }` | `save_settings` 后（含钳制结果） |
@@ -269,7 +270,8 @@ interface RevisionList {
 
 - 最终路径：
   - **默认 revision（HF `main` / MS `master`）**：`{saveDir}/{repoId 的安全形式}/{remotePath 的安全形式}`（与 v0.1.x 完全一致，保证历史任务/本地库路径不变）。
-  - **非默认 revision**：`{saveDir}/{repoId}/{revision 的安全形式}/{remotePath}`，避免同一仓库不同分支/标签的同名文件互相覆盖；`revision` 按 `util::sanitize_segment` 净化。
+  - **非默认 revision（v0.2.1 新任务）**：`{saveDir}/.mdm-revisions/{revision UTF-8 字节的十六进制编码}/{repoId}/{remotePath}`；revision 允许合法 `/` 分段，整体编码以区分大小写、目录与分支。已有任务保留原保存路径。
+  - 新任务入队校验与插入串行化，最终路径、临时文件和元数据均不得与已有不同任务发生物理路径冲突；启动时也拒绝旧队列的冲突记录。
   - `repoId` 中的 `/` 保留为目录分隔（即 `org/model` → `org/model`）。
 - 临时文件：`{finalPath}.part`；元数据：`{finalPath}.part.json`（保存 etag/lastModified/total/repoId/remotePath；v0.2.0 分段下载额外保存 chunkSize/chunks）。
 - 路径安全：拒绝 `..`、绝对路径、Windows 盘符、UNC 前缀、以分隔符开头的 `remotePath`；拒绝已存在的符号链接/junction（下载前检查每级父目录与目标文件）。
@@ -288,13 +290,13 @@ interface RevisionList {
    - `401/403`：不可重试，提示检查 Token/授权。
    - `404`：不可重试，提示文件不存在。
    - `429/5xx`/网络错误：按 `maxRetries` 指数退避重试（1s, 2s, 4s… 上限 30s）。
-4. 续传时校验 `.part.json` 中 etag/lastModified 与响应头一致；不一致则从头下载（删除 part）。
+4. 续传校验本次传输最新 etag/lastModified（包括重试前已获取的响应）并发送 If-Range；不一致则从头下载。缺失或损坏的元数据不视为可信断点，清理后重下。
 5. 流式写入：`tokio::fs::File` + `AsyncWriteExt`，每写一块调用限速器。
 
 ### 5.3 并发与限速
 
 - 全局并发：同时 active 任务数 ≤ `settings.concurrency`；队列 FIFO。
-- 限速：全局令牌桶（字节/秒），每个下载任务写入前扣减令牌；`bandwidthLimit == 0` 时跳过。令牌桶按 50ms 粒度补充，避免全局吞吐抖动。
+- 限速：全局令牌桶（字节/秒），每个下载任务写入前分批扣减令牌，支持一次预算超过桶容量；网络与限速等待可被暂停/取消中断；`bandwidthLimit == 0` 时跳过。令牌桶按 50ms 粒度补充，避免全局吞吐抖动。
 - 每次设置变更立即生效（限速器/并发信号量读取最新 settings）。
 
 ### 5.4 暂停/取消
@@ -329,12 +331,13 @@ interface RevisionList {
 - 设置项 `connectionsPerFile`（1..=8，默认 **4**）。任务实际连接数 = min(设置值, 可切分段数)；`1` 时走原有单流引擎。
 - 支持条件：远端返回可用 `Content-Range`（206 或 ModelScope 的 200+Content-Range）且 total 已知；否则自动回退单流引擎（删除分段元数据，按 5.2 单流逻辑下载）。
 - 分段策略：固定分块 `CHUNK_SIZE = 16 MiB`（最后一块可短），`chunks[i]` 记录已下载字节；连接池从「未完成的块」中领取任务（先到先得，避免长段拖尾）。
-- 临时文件：首次分段前若 `.part` 是旧版单流文件（长度 < total 且无 `chunks` 元数据），将其视为**连续前缀**转换为分段进度（`floor(len/CHUNK_SIZE)` 块完成 + 边界块部分完成），随后 `set_len(total)` 预分配；保留断点，不重新下载。
+- 临时文件：首次分段前若 `.part` 是旧版单流文件（长度 < total 且无 `chunks` 元数据），将其视为**连续前缀**转换为分段进度（`floor(len/CHUNK_SIZE)` 块完成 + 边界块部分完成），先持久化分段元数据，再 `set_len(total)` 预分配；元数据写入失败必须终止。仅保留元数据有效且远端版本一致的旧断点。
 - 写入：各连接使用独立文件句柄 `seek(offset) + write`；进度以全局原子计数聚合；限速令牌桶与暂停/取消检查与单流一致（每次读取块都检查）。
 - 每个分块独立重试（指数退避，计入任务 `retries`）；单块非可重试错误（401/403/404）终止任务并保留 `.part`/元数据供恢复。
 - 完成：全部块满 → `flush` + 删除 `.part.json` + 原子 rename（同 5.1）。
-- 校验：分段请求必须校验 `Content-Range` 的 start 与块内偏移一致、total 与已知一致；远端 etag/lastModified 与元数据不一致 → 从头下载（删除 part/meta）。
-- 进度事件语义不变；`downloaded` = 各块已完成字节之和（跨恢复累计）。
+- 校验：每个分段响应必须校验 etag/lastModified 及 `Content-Range` 的 start/end/total；远端 etag/lastModified 与元数据不一致 → 从头下载（删除 part/meta）。
+- v0.2.1：状态更新和进度带 `updateSeq`；较新序号可降低 downloaded（从头重下），旧序号丢弃。快照替换缓存，仅重放请求期间收到的事件及删除；
+- 进度事件其余语义不变；`downloaded` = 各块已完成字节之和（跨恢复累计）。
 - 并发约束：全局并发槽仍按任务计（一个任务不论用几条连接只占一个槽）；文档提示总连接数 ≈ `concurrency × connectionsPerFile`。
 
 ## 6. 数据源 HTTP 接口（2026-11-03 实测，见 docs/api-contracts.md）
@@ -370,7 +373,7 @@ interface RevisionList {
 
 ### 代理 / 镜像
 
-- `http` client 构建：`reqwest::Client::builder()`，若 `settings.proxy` 非空则 `.proxy(reqwest::Proxy::all(...))`，否则默认读取环境变量；超时：连接 30s，无全局请求超时（大文件可能数小时）；`user_agent` 设为 `ModelDownloadManager/0.1 (+https://github.com/)`。
+- `http` client 构建：`reqwest::Client::builder()`，若 `settings.proxy` 非空则 `.proxy(reqwest::Proxy::all(...))`，否则默认读取环境变量；支持 HTTP/HTTPS/SOCKS5/SOCKS5h；超时：连接 30s、空闲读取 60s，无全局请求超时（大文件可能数小时）；`user_agent` 设为 `ModelDownloadManager/0.1 (+https://github.com/)`。
 - 修改设置后重建 client（保存设置时重建）。
 - `hfEndpoint` 必须是 http(s) 且 host 合法；拼接 URL 前去除尾部 `/`。
 

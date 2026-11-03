@@ -21,7 +21,8 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::download::{
     backoff_delay, header_text, parse_content_range, part_length, sleep_with_control,
-    status_is_retryable, DownloadError, PartMeta, TransferContext, TransferOutcome, WaitOutcome,
+    status_is_retryable, with_control, DownloadError, PartMeta, TransferContext, TransferOutcome,
+    WaitOutcome,
 };
 use crate::sources;
 use crate::util::{self, EventSink};
@@ -86,10 +87,7 @@ pub(crate) async fn attempt(
     };
 
     let total = probe.total;
-    let chunk_size = ctx
-        .chunk_size_override
-        .unwrap_or(CHUNK_SIZE)
-        .max(1);
+    let chunk_size = ctx.chunk_size_override.unwrap_or(CHUNK_SIZE).max(1);
     let nchunks = ((total + chunk_size - 1) / chunk_size) as usize;
     if nchunks <= 1 {
         // 只有一个分块：交给原单流引擎（若已有分段元数据需先清理，避免预分配文件干扰）。
@@ -100,24 +98,16 @@ pub(crate) async fn attempt(
         return Ok(Attempt::Fallback);
     }
 
-    // 2. 远端文件变化检测（total 不一致 → 从头下载；etag/lastModified 不一致时，
-    //    对**旧版单流断点**优先保留用户已下载数据（P1 无损转换硬性要求），仅告警。
+    // 2. Remote changes invalidate both legacy and segmented partial data.
     let mut stored = stored;
     let mut part_len = part_len;
-    // 旧版单流连续前缀（v0.1.x 产生的断点，无 chunks 元数据）。
-    let legacy_single_prefix = !stored.is_segmented() && part_len > 0 && part_len < total;
     let size_changed = stored.total > 0 && stored.total != total;
     let metadata_changed = mismatch(stored.etag.as_deref(), probe.etag.as_deref())
         || mismatch(
             stored.last_modified.as_deref(),
             probe.last_modified.as_deref(),
         );
-    if metadata_changed && legacy_single_prefix {
-        eprintln!(
-            "警告：旧版单流断点的 etag/lastModified 与远端探测不一致，为保留已下载数据继续分段续传"
-        );
-    }
-    let remote_changed = size_changed || (metadata_changed && !legacy_single_prefix);
+    let remote_changed = size_changed || metadata_changed;
     if remote_changed {
         let _ = tokio::fs::remove_file(&ctx.part_path).await;
         let _ = tokio::fs::remove_file(&ctx.meta_path).await;
@@ -132,6 +122,7 @@ pub(crate) async fn attempt(
 
     // 4. 计算分段进度。
     let segments = if stored.is_segmented()
+        && part_len == total
         && stored.total == total
         && stored.chunk_size == Some(chunk_size)
         && stored.chunks.as_ref().map(Vec::len) == Some(nchunks)
@@ -152,6 +143,18 @@ pub(crate) async fn attempt(
         Segments::new(total, chunk_size)
     };
 
+    let etag = probe.etag.clone();
+    let last_modified = probe.last_modified.clone();
+    // The sidecar must be durable BEFORE the file can acquire a misleading full length.
+    save_segmented_meta(
+        ctx,
+        total,
+        chunk_size,
+        &segments.chunks,
+        &etag,
+        &last_modified,
+    )?;
+
     // 5. 预分配 `.part` 到 total 长度（保留已有前缀内容）。
     {
         let file = OpenOptions::new()
@@ -171,13 +174,6 @@ pub(crate) async fn attempt(
         })?;
     }
 
-    let etag = probe.etag.clone().or_else(|| stored.etag.clone()).or_else(|| ctx.etag.clone());
-    let last_modified = probe
-        .last_modified
-        .clone()
-        .or_else(|| stored.last_modified.clone())
-        .or_else(|| ctx.last_modified.clone());
-
     let mut progress_throttle = ProgressThrottle::new(&ctx.task_id);
     if segments.all_complete() {
         let downloaded = segments.downloaded();
@@ -188,7 +184,7 @@ pub(crate) async fn attempt(
             &segments.chunks,
             &etag,
             &last_modified,
-        );
+        )?;
         util::emit_progress(sink, &ctx.task_id, downloaded, total, 0);
         return finish_files(ctx, sink, total, etag, last_modified).map(Attempt::Done);
     }
@@ -200,7 +196,7 @@ pub(crate) async fn attempt(
         &segments.chunks,
         &etag,
         &last_modified,
-    );
+    )?;
     util::emit_progress(sink, &ctx.task_id, segments.downloaded(), total, 0);
     progress_throttle.reset();
 
@@ -212,6 +208,8 @@ pub(crate) async fn attempt(
         url: ctx.url.clone(),
         client: ctx.client.clone(),
         auth_token: ctx.auth_token.clone(),
+        etag: etag.clone(),
+        last_modified: last_modified.clone(),
     });
     let shared = Arc::new(Shared {
         state: Mutex::new(SegState {
@@ -239,21 +237,26 @@ pub(crate) async fn attempt(
     let worker_count = connections.min(nchunks);
     let mut workers: Vec<BoxFuture<'_, WorkerEnd>> = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
-        workers.push(Box::pin(run_worker(ctx, sink, plan.clone(), shared.clone())));
+        workers.push(Box::pin(run_worker(
+            ctx,
+            sink,
+            plan.clone(),
+            shared.clone(),
+        )));
     }
     let ends = join_all(workers).await;
     saver.abort();
+    let _ = saver.await;
 
     // 7. 汇总结果（取消 > 暂停 > 错误 > 完成）。
-    let cancelled = ctx.control.is_cancelled()
-        || ends
-            .iter()
-            .any(|end| matches!(end, WorkerEnd::Cancelled));
-    let paused = ctx.control.is_paused()
-        || ends.iter().any(|end| matches!(end, WorkerEnd::Paused));
-    let fatal = ends.iter().find_map(|end| match end {
-        WorkerEnd::Fatal(err) => Some(err.clone()),
-        _ => None,
+    let cancelled =
+        ctx.control.is_cancelled() || ends.iter().any(|end| matches!(end, WorkerEnd::Cancelled));
+    let paused = ctx.control.is_paused() || ends.iter().any(|end| matches!(end, WorkerEnd::Paused));
+    let fatal = shared.peek_fatal().or_else(|| {
+        ends.iter().find_map(|end| match end {
+            WorkerEnd::Fatal(err) => Some(err.clone()),
+            _ => None,
+        })
     });
     let (downloaded, complete) = shared.snapshot();
 
@@ -265,7 +268,7 @@ pub(crate) async fn attempt(
             &shared.chunks_snapshot(),
             &etag,
             &last_modified,
-        );
+        )?;
         util::emit_progress(sink, &ctx.task_id, downloaded, total, 0);
         return Ok(Attempt::Done(TransferOutcome::Cancelled {
             downloaded,
@@ -280,7 +283,7 @@ pub(crate) async fn attempt(
             &shared.chunks_snapshot(),
             &etag,
             &last_modified,
-        );
+        )?;
         util::emit_progress(sink, &ctx.task_id, downloaded, total, 0);
         return Ok(Attempt::Done(TransferOutcome::Paused {
             downloaded,
@@ -297,7 +300,7 @@ pub(crate) async fn attempt(
             &shared.chunks_snapshot(),
             &etag,
             &last_modified,
-        );
+        )?;
         return Err(err);
     }
     if complete {
@@ -310,7 +313,7 @@ pub(crate) async fn attempt(
         &shared.chunks_snapshot(),
         &etag,
         &last_modified,
-    );
+    )?;
     Err(DownloadError::retryable(
         "多连接分段下载未能全部完成，请重试任务",
     ))
@@ -344,9 +347,11 @@ async fn probe_remote(ctx: &TransferContext) -> Result<ProbeOutcome, DownloadErr
         if let Some(token) = ctx.auth_token.as_deref() {
             request = request.bearer_auth(token);
         }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(err) => {
+        let response = match with_control(&ctx.control, request.send()).await {
+            Ok(Ok(response)) => response,
+            Err(WaitOutcome::Cancelled) => return Ok(ProbeOutcome::Cancelled),
+            Err(_) => return Ok(ProbeOutcome::Paused),
+            Ok(Err(err)) => {
                 attempts += 1;
                 if attempts > ctx.max_retries {
                     return Err(DownloadError::retryable(util::redact_urls(&format!(
@@ -486,7 +491,10 @@ struct Shared {
 
 impl Shared {
     fn claim(&self) -> Option<Job> {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         for index in 0..state.segments.chunks.len() {
             let chunk_len = state.segments.chunk_len(index);
             if state.segments.chunks[index] < chunk_len && !state.claimed[index] {
@@ -508,7 +516,10 @@ impl Shared {
     }
 
     fn update(&self, index: usize, done: u64) {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let chunk_len = state.segments.chunk_len(index);
         let done = done.min(chunk_len);
         if done > state.segments.chunks[index] {
@@ -517,7 +528,10 @@ impl Shared {
     }
 
     fn snapshot(&self) -> (u64, bool) {
-        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         (state.segments.downloaded(), state.segments.all_complete())
     }
 
@@ -531,7 +545,10 @@ impl Shared {
     }
 
     fn set_fatal(&self, error: DownloadError) {
-        let mut fatal = self.fatal.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut fatal = self
+            .fatal
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if fatal.is_none() {
             *fatal = Some(error);
         }
@@ -574,6 +591,8 @@ struct Plan {
     url: String,
     client: reqwest::Client,
     auth_token: Option<String>,
+    etag: Option<String>,
+    last_modified: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -698,17 +717,20 @@ async fn fetch_chunk(
             .get(&plan.url)
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .header(reqwest::header::RANGE, range);
+        if let Some(validator) = plan.etag.as_deref().or(plan.last_modified.as_deref()) {
+            request = request.header(reqwest::header::IF_RANGE, validator);
+        }
         if let Some(token) = plan.auth_token.as_deref() {
             request = request.bearer_auth(token);
         }
 
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(err) => {
+        let response = match with_control(&ctx.control, request.send()).await {
+            Ok(Ok(response)) => response,
+            Err(WaitOutcome::Cancelled) => return Err(ChunkEnd::Cancelled),
+            Err(_) => return Err(ChunkEnd::Paused),
+            Ok(Err(err)) => {
                 let reason = util::redact_urls(&format!("网络请求失败（{err}）"));
-                if let Some(end) =
-                    retry_or_end(ctx, shared, &mut retries, &reason).await
-                {
+                if let Some(end) = retry_or_end(ctx, shared, &mut retries, &reason).await {
                     return Err(end);
                 }
                 continue;
@@ -720,8 +742,23 @@ async fn fetch_chunk(
             .and_then(|value| parse_content_range(&value));
         match status.as_u16() {
             200 | 206 => {
+                if mismatch(
+                    plan.etag.as_deref(),
+                    header_text(&response, reqwest::header::ETAG).as_deref(),
+                ) || mismatch(
+                    plan.last_modified.as_deref(),
+                    header_text(&response, reqwest::header::LAST_MODIFIED).as_deref(),
+                ) {
+                    return Err(ChunkEnd::Fatal(DownloadError::non_retryable(
+                        "远端文件版本在下载期间变化，请重试任务",
+                    )));
+                }
                 let range_ok = content_range
-                    .map(|range| range.start == Some(offset) && range.total == Some(plan.total))
+                    .map(|range| {
+                        range.start == Some(offset)
+                            && range.end == Some(job.end)
+                            && range.total == Some(plan.total)
+                    })
                     .unwrap_or(false);
                 if !range_ok {
                     if status.as_u16() == 200 && content_range.is_none() {
@@ -743,13 +780,9 @@ async fn fetch_chunk(
                         if written == job.end + 1 {
                             return Ok(());
                         }
-                        if let Some(end) = retry_or_end(
-                            ctx,
-                            shared,
-                            &mut retries,
-                            "连接中断，分块未下载完整",
-                        )
-                        .await
+                        if let Some(end) =
+                            retry_or_end(ctx, shared, &mut retries, "连接中断，分块未下载完整")
+                                .await
                         {
                             return Err(end);
                         }
@@ -800,7 +833,19 @@ async fn stream_chunk(
         })?;
     let mut written = start_offset;
     let mut stream = response.bytes_stream();
-    while let Some(item) = stream.next().await {
+    loop {
+        let item = match with_control(&ctx.control, stream.next()).await {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
+            Err(reason) => {
+                let _ = file.flush().await;
+                return Err(if matches!(reason, WaitOutcome::Cancelled) {
+                    ChunkEnd::Cancelled
+                } else {
+                    ChunkEnd::Paused
+                });
+            }
+        };
         if shared.control.is_cancelled() {
             let _ = file.flush().await;
             return Err(ChunkEnd::Cancelled);
@@ -826,7 +871,16 @@ async fn stream_chunk(
                 "分块响应长度超出预期",
             )));
         }
-        ctx.limiter.acquire(chunk.len() as u64).await;
+        if let Err(reason) =
+            with_control(&ctx.control, ctx.limiter.acquire(chunk.len() as u64)).await
+        {
+            let _ = file.flush().await;
+            return Err(if matches!(reason, WaitOutcome::Cancelled) {
+                ChunkEnd::Cancelled
+            } else {
+                ChunkEnd::Paused
+            });
+        }
         if shared.control.is_cancelled() {
             let _ = file.flush().await;
             return Err(ChunkEnd::Cancelled);
@@ -840,6 +894,11 @@ async fn stream_chunk(
                 "写入文件失败（磁盘空间不足或权限不足）：{err}"
             ))));
         }
+        file.flush().await.map_err(|error| {
+            ChunkEnd::Fatal(DownloadError::non_retryable(format!(
+                "写入分块失败：{error}"
+            )))
+        })?;
         written += chunk.len() as u64;
         shared.update(job.index, written - job.start);
         shared.emit_progress(sink, ctx, plan.total);
@@ -917,7 +976,7 @@ fn save_segmented_meta(
     chunks: &[u64],
     etag: &Option<String>,
     last_modified: &Option<String>,
-) {
+) -> Result<(), DownloadError> {
     let meta = PartMeta {
         etag: etag.clone(),
         last_modified: last_modified.clone(),
@@ -927,9 +986,8 @@ fn save_segmented_meta(
         chunk_size: Some(chunk_size),
         chunks: Some(chunks.to_vec()),
     };
-    if let Err(err) = util::atomic_write_json(&ctx.meta_path, &meta) {
-        eprintln!("保存分段断点信息失败：{err}");
-    }
+    util::atomic_write_json(&ctx.meta_path, &meta)
+        .map_err(|err| DownloadError::non_retryable(format!("保存分段断点信息失败：{err}")))
 }
 
 fn save_segmented_meta_owned(
@@ -941,7 +999,7 @@ fn save_segmented_meta_owned(
     chunks: Vec<u64>,
     etag: &Option<String>,
     last_modified: &Option<String>,
-) {
+) -> Result<(), DownloadError> {
     let meta = PartMeta {
         etag: etag.clone(),
         last_modified: last_modified.clone(),
@@ -951,9 +1009,8 @@ fn save_segmented_meta_owned(
         chunk_size: Some(chunk_size),
         chunks: Some(chunks),
     };
-    if let Err(err) = util::atomic_write_json(meta_path, &meta) {
-        eprintln!("保存分段断点信息失败：{err}");
-    }
+    util::atomic_write_json(meta_path, &meta)
+        .map_err(|err| DownloadError::non_retryable(format!("保存分段断点信息失败：{err}")))
 }
 
 fn spawn_meta_saver(
@@ -969,7 +1026,7 @@ fn spawn_meta_saver(
         loop {
             tokio::time::sleep(META_SAVE_INTERVAL).await;
             let chunks = shared.chunks_snapshot();
-            save_segmented_meta_owned(
+            if let Err(error) = save_segmented_meta_owned(
                 &meta_path,
                 &repo_id,
                 &remote_path,
@@ -978,7 +1035,10 @@ fn spawn_meta_saver(
                 chunks,
                 &etag,
                 &last_modified,
-            );
+            ) {
+                shared.set_fatal(error);
+                break;
+            }
         }
     })
 }
@@ -991,16 +1051,12 @@ fn finish_files(
     etag: Option<String>,
     last_modified: Option<String>,
 ) -> Result<TransferOutcome, DownloadError> {
-    if let Err(err) = std::fs::remove_file(&ctx.meta_path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("删除分段断点信息失败：{err}");
-        }
-    }
     if let Err(err) = std::fs::rename(&ctx.part_path, &ctx.save_path) {
         return Err(DownloadError::non_retryable(format!(
             "无法完成文件重命名（文件可能被占用或权限不足）：{err}"
         )));
     }
+    let _ = std::fs::remove_file(&ctx.meta_path);
     util::emit_progress(sink, &ctx.task_id, total, total, 0);
     Ok(TransferOutcome::Completed {
         downloaded: total,

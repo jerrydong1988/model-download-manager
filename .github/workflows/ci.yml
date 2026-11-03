@@ -1,0 +1,94 @@
+name: Windows CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - run: npm ci
+      - name: Validate release version
+        run: node scripts/check-release.mjs
+      - name: Validate public files
+        run: npm run check:public
+      - name: Frontend regression tests
+        run: npm run test:frontend
+      - name: UI rules
+        run: npm run check:ui
+      - name: Build frontend
+        run: npm run build
+      - name: Backend regression tests
+        working-directory: src-tauri
+        run: cargo test --locked --no-fail-fast
+      - name: Build Windows installer and executable
+        run: npm run tauri:build -- --bundles nsis
+      - name: Collect release files and checksums
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Copy-Item src-tauri/target/release/model-download-manager.exe "release-assets/Model-Download-Manager_${version}_x64.exe"
+          $binaryVersion = (Get-Item src-tauri/target/release/model-download-manager.exe).VersionInfo.ProductVersion
+          if ($binaryVersion -notlike "$version*") { throw "Unexpected executable version: $binaryVersion" }
+          $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis/*_${version}_x64-setup.exe")
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          Copy-Item $installers[0].FullName "release-assets/Model-Download-Manager_${version}_x64-setup.exe"
+          $lines = Get-ChildItem release-assets/*.exe | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content release-assets/SHA256SUMS.txt -Encoding utf8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-release
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-release
+          path: release-assets
+      - name: Verify and publish stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd release-assets
+          sha256sum -c SHA256SUMS.txt
+          cd ..
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "Model Download Manager $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md --latest

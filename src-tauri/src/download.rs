@@ -2,7 +2,7 @@
 //!
 //! 设计要点（契约 §5）：
 //! - `.part` 保存未完成数据，`.part.json` 保存 etag/lastModified/total/repoId/remotePath；
-//! - 206 校验 `Content-Range` 起点与 etag/lastModified；200 从头写；416 且 total == part 长度视为完成；
+//! - 206 校验 `Content-Range` 起点与 etag/lastModified；200 从头写；416 对旧断点重新获取响应体；
 //! - 401/403/404 不重试；408/429/5xx/网络错误按 `maxRetries` 指数退避（1s、2s、4s… 上限 30s）；
 //! - 每块写入前扣减全局令牌桶预算，并检查暂停/取消标志；
 //! - 进度事件每任务 ≤ 4 次/秒；完成时先发最终进度，再由 queue 发 task-updated；
@@ -807,9 +807,9 @@ pub async fn transfer(
     let mut downloaded = part_length(&ctx.part_path).await;
     let mut stale_part_reset_used = false;
 
-    // P1-3：本地 part 比远端声明更长（远端变小/文件被污染）→ 丢弃重下，
+    // P1-3：旧单流 part 长度达到远端大小（也可能是旧版预分配崩溃遗留）→ 丢弃重下，
     // 不能直接 rename 完成，否则多余字节会被当作有效内容。
-    if total_size > 0 && downloaded > total_size {
+    if total_size > 0 && downloaded >= total_size {
         let _ = tokio::fs::remove_file(&ctx.part_path).await;
         let _ = tokio::fs::remove_file(&ctx.meta_path).await;
         downloaded = 0;
@@ -818,20 +818,6 @@ pub async fn transfer(
 
     let mut progress = ProgressReporter::new(sink, &ctx.task_id, downloaded);
     progress.emit(downloaded, total_size, true);
-
-    // 2. 上次已下载完整但尚未 rename（例如完成瞬间被暂停/崩溃）。
-    //    仅当 part 长度**恰好等于** total 时直接完成（P1-3）。
-    if total_size > 0 && downloaded == total_size {
-        return finish_transfer(
-            ctx,
-            downloaded,
-            total_size,
-            etag,
-            last_modified,
-            &mut progress,
-        )
-        .await;
-    }
 
     let mut retries_used: u32 = 0;
     let mut remote_reset_used = false;
@@ -853,18 +839,7 @@ pub async fn transfer(
 
         downloaded = part_length(&ctx.part_path).await;
         if total_size > 0 && downloaded >= total_size {
-            if downloaded == total_size {
-                return finish_transfer(
-                    ctx,
-                    downloaded,
-                    total_size,
-                    etag,
-                    last_modified,
-                    &mut progress,
-                )
-                .await;
-            }
-            // part 超长：仅允许丢弃重下一次，避免异常情况下无限循环。
+            // part 达到完整长度但没有完整响应确认：仅允许丢弃重下一次，避免异常情况下无限循环。
             if stale_part_reset_used {
                 return Err(DownloadError::non_retryable(
                     "本地临时文件大小与远端不一致，已停止下载，请删除该任务后重试",
@@ -1048,21 +1023,8 @@ pub async fn transfer(
                 }
             }
             416 => {
-                // `Content-Range: bytes */N` 且 N == 已下载长度 → 已经完整。
-                let range_total = header_text(&response, reqwest::header::CONTENT_RANGE)
-                    .and_then(|value| parse_content_range(&value))
-                    .and_then(|range| range.total);
-                if downloaded > 0 && range_total == Some(downloaded) {
-                    return finish_transfer(
-                        ctx,
-                        downloaded,
-                        range_total.unwrap_or(downloaded),
-                        etag,
-                        last_modified,
-                        &mut progress,
-                    )
-                    .await;
-                }
+                // A matching 416 total proves remote length, not that a legacy
+                // preallocated part contains data. Fetch the body from zero.
                 if remote_reset_used {
                     return Err(DownloadError::non_retryable(
                         "无法继续断点续传：远端文件已变化或服务器拒绝 Range 请求",
@@ -1124,7 +1086,12 @@ async fn finish_or_retry(
     last_modified: &Option<String>,
     progress: &mut ProgressReporter<'_>,
 ) -> Result<Option<TransferOutcome>, DownloadError> {
-    let complete = total_size > 0 && written >= total_size;
+    if total_size > 0 && written > total_size {
+        return Err(DownloadError::non_retryable(
+            "响应体超过远端声明的文件大小，已停止下载",
+        ));
+    }
+    let complete = total_size > 0 && written == total_size;
     let unknown_total_finished = total_size == 0;
     if complete || unknown_total_finished {
         let outcome = finish_transfer(

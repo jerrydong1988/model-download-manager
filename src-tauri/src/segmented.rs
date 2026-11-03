@@ -115,10 +115,8 @@ pub(crate) async fn attempt(
         part_len = 0;
     }
 
-    // 3. 旧单流 part 长度为 total 且无分段元数据 → 与单流语义一致，视为已完成。
-    if !stored.is_segmented() && total > 0 && part_len == total {
-        return finish_files(ctx, sink, total, probe.etag, probe.last_modified).map(Attempt::Done);
-    }
+    // A legacy sidecar has no per-chunk proof: a full-length part may still
+    // contain preallocated holes from v0.2.0. Start every chunk again below.
 
     // 4. 计算分段进度。
     let segments = if stored.is_segmented()

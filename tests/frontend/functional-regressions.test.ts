@@ -41,6 +41,13 @@ test('快照替换旧状态并删除后端不存在的记录', () => {
   assert.deepEqual(reconcileTaskSnapshot([], []), [])
 })
 
+test('有序完整任务快照清除重试前的错误和完成时间', () => {
+  const failed = { ...task, status: 'error' as const, error: '网络错误', completedAt: 42 }
+  const resumed = mergeTask(failed, { ...task, status: 'queued', updateSeq: 11 })
+  assert.equal(resumed.error, undefined)
+  assert.equal(resumed.completedAt, undefined)
+})
+
 test('快照只重放请求期间的更新、删除和未知任务进度', () => {
   const result = reconcileTaskSnapshot([task, { ...task, taskId: 'removed' }], [
     { kind: 'progress', progress: { taskId: 't1', totalSize: 100, downloaded: 0, speed: 0, updateSeq: 11 } },

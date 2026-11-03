@@ -1,5 +1,7 @@
 # 模型下载管理器（Model Download Manager）
 
+[下载最新正式版（Windows x64）](https://github.com/jerrydong1988/model-download-manager/releases/latest) · [发布说明](docs/RELEASE-NOTES.md)
+
 独立的模型权重下载管理桌面工具：从 **ModelScope** 与 **HuggingFace** 浏览仓库、多选文件、
 排队下载，支持断点续传、暂停/继续、并发与限速、下载历史与本地模型库管理。
 v0.1.3 起支持**暗色模式、托盘后台下载、系统通知、全局快捷键**，并完成整套 UI/UX 审计落地（Token 化、密度、无障碍）。

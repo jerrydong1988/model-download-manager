@@ -46,7 +46,7 @@ jobs:
         run: npm run build
       - name: Backend regression tests
         working-directory: src-tauri
-        run: cargo test --locked
+        run: cargo test --locked --no-fail-fast
       - name: Build Windows installer and executable
         run: npm run tauri:build -- --bundles nsis
       - name: Collect release files and checksums
@@ -59,7 +59,7 @@ jobs:
           if ($binaryVersion -notlike "$version*") { throw "Unexpected executable version: $binaryVersion" }
           $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis/*_${version}_x64-setup.exe")
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
-          Copy-Item $installers[0].FullName release-assets/
+          Copy-Item $installers[0].FullName "release-assets/Model-Download-Manager_${version}_x64-setup.exe"
           $lines = Get-ChildItem release-assets/*.exe | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
             "$hash  $($_.Name)"

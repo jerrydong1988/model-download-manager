@@ -461,7 +461,7 @@ mod tests {
         );
         assert_eq!(
             url,
-            "https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/resolve/refs/pr/3/config.json"
+            "https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/resolve/refs%2Fpr%2F3/config.json"
         );
     }
 }

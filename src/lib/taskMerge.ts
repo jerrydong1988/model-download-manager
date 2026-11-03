@@ -28,7 +28,9 @@ export function isStaleStatusRegression(previous: TaskStatus, incoming: TaskStat
 export function mergeTask(previous: DownloadTask, incoming: DownloadTask): DownloadTask {
   if (incoming.updateSeq !== undefined && previous.updateSeq !== undefined) {
     if (incoming.updateSeq < previous.updateSeq) return previous
-    if (incoming.updateSeq > previous.updateSeq) return { ...previous, ...incoming }
+    // task-updated contains a complete snapshot. Missing optional fields mean
+    // cleared values (for example error after retry), not retained old fields.
+    return incoming
   }
   const status = isStaleStatusRegression(previous.status, incoming.status)
     ? previous.status

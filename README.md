@@ -1,0 +1,234 @@
+# 模型下载管理器（Model Download Manager）
+
+独立的模型权重下载管理桌面工具：从 **ModelScope** 与 **HuggingFace** 浏览仓库、多选文件、
+排队下载，支持断点续传、暂停/继续、并发与限速、下载历史与本地模型库管理。
+v0.1.3 起支持**暗色模式、托盘后台下载、系统通知、全局快捷键**，并完成整套 UI/UX 审计落地（Token 化、密度、无障碍）。
+v0.1.4 修复下载任务状态竞态（任务实际在下载但队列显示「排队中 / 0 B/s」的问题）。
+v0.2.0 新增**单文件多连接分段下载**（实测 4 连接提速 3.3–6.4 倍）、**多扫描根目录**、**仓库 revision（分支/标签）选择**、**通知点击跳转主窗口**。
+
+> 项目从 `LlamaServerManager` 的下载模块中抽取、重构而来，本工具只专注「模型下载」这一件事。
+
+> 下列截图均由浏览器 Mock 模式生成，使用虚构示例路径与演示文件，不展示本机模型库或访问凭据。
+
+![浏览仓库（浅色）](docs/screenshots/01-browse.png)
+
+| 下载队列 | 本地模型库（演示数据） |
+| --- | --- |
+| ![下载队列](docs/screenshots/02-downloads.png) | ![本地模型库](docs/screenshots/03-library.png) |
+
+| 仓库文件选择 | 设置（外观/托盘/通知） |
+| --- | --- |
+| ![仓库详情](docs/screenshots/05-repo-detail.png) | ![设置](docs/screenshots/04-settings.png) |
+
+| 暗色 · 浏览仓库 | 暗色 · 本地模型库 |
+| --- | --- |
+| ![暗色浏览](docs/screenshots/dark-01-browse.png) | ![暗色本地库](docs/screenshots/dark-03-library.png) |
+
+| 暂停/续传 | 全局快捷键帮助 |
+| --- | --- |
+| ![暂停续传](docs/screenshots/06-paused-resume.png) | ![快捷键](docs/screenshots/07-shortcuts-help.png) |
+
+| 本地库多扫描根目录 | 仓库 revision 选择 |
+| --- | --- |
+| ![多扫描根](docs/screenshots/11-library-multiroot.png) | ![revision 选择](docs/screenshots/12-revision-selector.png) |
+
+| 下载引擎设置（连接数/并发/限速） | 任务 revision 徽章 |
+| --- | --- |
+| ![下载引擎设置](docs/screenshots/13-settings-engine.png) | ![任务 revision](docs/screenshots/14-task-revision-badge.png) |
+
+## 功能特性
+
+- **双数据源浏览**：HuggingFace / ModelScope 仓库搜索（分页加载）、仓库文件树浏览，自动分类为 权重 / 投影器 / 权重矩阵 / 配置 / 其他（`.hgn` 等特殊权重、`mmproj` 投影器、`imatrix` 矩阵均正确识别）；仓库详情支持 **revision 选择**（默认 / 分支 / 标签 / 自定义，v0.2.0）
+- **多选下载**：文件树多选，默认全选模型文件（权重 + 投影器），实时显示选中合计大小
+- **可靠下载引擎**
+  - **单文件多连接分段下载（v0.2.0）**：固定 16 MiB 分块 + 1–8 条 HTTP Range 连接并行（默认 4 条），CDN 单连接限速时显著提速；实测 ModelScope 单连接 12.6 MB/s，4 连接平均 41.4 MB/s、峰值 80.3 MB/s
+  - 不支持 Range / 小文件 / 大小未知时自动回退单流；旧版单流 `.part` 断点升级后无损转分段继续
+  - HTTP Range 断点续传（`.part` + `.part.json` 元数据校验；远端变更自动重下）；自动重试指数退避；完成后原子改名；已存在同尺寸文件自动跳过
+  - 兼容 ModelScope「200 + Content-Range」的特殊续传语义与 hf-mirror 的 CDN 跳转
+- **任务队列**：FIFO 排队、全局并发数 1–8 动态调整、全局限速（MB/s）、暂停 / 继续 / 取消 / 重试；不同 revision 同名文件分别落盘（非默认 revision 路径含 revision 层）
+- **后台下载（v0.1.3）**：关闭窗口默认**最小化到托盘**，下载继续；再次打开（或再次双击快捷方式）恢复窗口并显示最新进度；托盘菜单支持显示窗口 / 暂停全部 / 继续全部 / 退出；退出前自动暂停并落盘任务
+- **系统通知（v0.1.3 / v0.2.0）**：下载完成 / 失败发送 Windows 通知（可在设置关闭）；**点击通知可跳转并聚焦主窗口**；应用内 toast 附带「打开位置 / 重试」操作
+- **持久化恢复**：关闭应用后任务保留，重新打开可继续（默认自动继续）
+- **本地模型库（目录树视图）**：按真实目录层级展示历史模型（目录聚合大小 / 文件数 / 最近修改），支持搜索、类型筛选、展开/折叠、文件详情、打开位置与删除；**多扫描根目录管理（v0.2.0）**：下载目录固定 + 最多 8 个附加模型目录，多根聚合统计与树节点分组；上千文件窗口化渲染不卡顿
+- **外观（v0.1.3）**：浅色 / 深色 / 跟随系统三选一，重启保持、首帧不闪白；内置 Noto Sans SC 可变字体（离线可用）
+- **交互与无障碍（v0.1.3）**：全局快捷键、Skip link、完整键盘导航、可见焦点环、≥12px 字号与 AA 对比度、状态播报、错误摘要；`Ctrl+1..4` 切页、`Ctrl+F` 搜索、`F5` 刷新本页、`Ctrl+,` 设置、`?` 快捷键帮助
+- **网络适配**：默认使用 HuggingFace 镜像 `hf-mirror.com`（国内可用），可切回官方；支持 HTTP/SOCKS 代理；可选平台 Token（gated / 私有仓库）
+
+## 环境要求
+
+- Windows 10/11（WebView2 运行时；Win11 自带，Win10 一般随 Edge 已安装）
+- 开发：Node.js ≥ 18、npm、Rust ≥ 1.80（stable）、Visual Studio Build Tools（C++ 桌面开发）
+- 打包：以上即可，`npm run tauri:build` 会自动下载 NSIS 工具
+
+## 开发
+
+```powershell
+npm install
+npm run tauri:dev        # 启动完整桌面应用（热更新）
+```
+
+仅调前端（浏览器 mock 模式，不需要后端）：
+
+```powershell
+npm run dev
+# 打开 http://localhost:1420/?mock=1
+```
+
+Mock 模式支持深链与空态：`?mock=1&repo=Qwen/Qwen3-235B-A22B&source=huggingface`、`?mock=1&empty=1`；
+本地库压力模式：`?mock=1&biglibrary=1`；下载通知：`&fast=1`；大量任务：`&bigtasks=1`；
+组件画廊（开发用）：`http://localhost:1420/src/assets/ui-preview.html?theme=dark`。
+
+校验与测试：
+
+```powershell
+npm run test:frontend    # 任务状态合并单元测试（Node 原生 test runner）
+npm run check:ui         # 设计令牌对比度 + UI 规则静态检查
+cd src-tauri; cargo test # 后端 62 单元 + 17 集成
+```
+
+## 构建安装包
+
+```powershell
+npm run tauri:build
+# 免安装可执行文件：src-tauri\target\release\model-download-manager.exe
+# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.2.0_x64-setup.exe
+```
+
+## 使用说明
+
+1. 首次打开进入「设置」，确认下载目录（默认 `%USERPROFILE%\Documents\Models`）；可在「外观」里选择主题、托盘与通知行为。
+2. 进入「浏览仓库」，选择 HuggingFace 或 ModelScope，搜索模型名 / 组织名（如 `Qwen`、`deepseek`），也可直接输入仓库 ID 打开。
+3. 点击仓库卡片进入详情，勾选需要的文件（默认已勾选权重 + 投影器），选择下载目录后点击「开始下载」。
+4. 在「下载队列」中查看进度、速度与剩余时间，可暂停 / 继续 / 取消 / 重试；文件会实时写入 `.part`，完成后自动改名。
+5. 下载完成后文件位于 `<下载目录>\<仓库ID>\<原文件路径>`；「本地模型库」可按目录树浏览、筛选与清理。
+6. 关闭窗口 = 最小化到托盘继续下载；需要完全退出时使用托盘菜单「退出」（会先暂停并保存任务状态）。
+
+### Token（访问令牌）说明
+
+Token 即平台访问令牌，作用等同 API-Key，**只用于私有仓库或需要授权（gated）的仓库，公开模型不需要填写**：
+
+| 平台 | 获取地址 | 用途 |
+|------|----------|------|
+| HuggingFace | https://huggingface.co/settings/tokens （`hf_...`） | gated 仓库（Llama/Gemma 等需同意协议）、提高 API 限额 |
+| ModelScope | https://modelscope.cn/my/myaccesstoken | 私有 / 受限仓库、提高 API 限额 |
+
+Token 保存在本机应用数据目录 `%APPDATA%\com.modeldownload.manager\settings.json` 中，不会上传到任何第三方；事件与日志中不会输出 Token。
+
+### HuggingFace 镜像（默认已开启）
+
+本工具默认把 HuggingFace 端点设为 `https://hf-mirror.com`（国内可直连），可随时在「设置 → HuggingFace 端点」切回官方 `https://huggingface.co` 或自定义镜像。
+
+### 代理
+
+填写 `http://127.0.0.1:7890` 这类地址后，仓库请求与下载都走代理；留空则使用系统环境变量代理设置。
+
+## 目录结构
+
+```
+src/                  React 前端（页面、组件、store、mock、字体资源）
+src-tauri/src/        Rust 后端（数据源、下载引擎、队列、设置、本地库、桌面托盘/通知）
+src-tauri/tests/      本地 mock HTTP server 集成测试（续传/416/5xx/暂停恢复）
+docs/                 架构与 IPC 契约、UI 审计与设计令牌、第三方 API 实测、QA 报告、截图
+design-system/        设计系统基线（ui-ux-pro-max 生成 + 项目适配说明）
+scripts/              图标生成、API 探测、UI 截图、对比度与 UI 规则校验脚本
+tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
+```
+
+## 开发文档
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构、模块所有权、可测试性要求
+- [docs/IPC-CONTRACT.md](docs/IPC-CONTRACT.md) — 前后端 IPC 契约（命令 / 事件 / 类型 / 设置 / 托盘语义）
+- [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md) — 设计令牌与 UI 实现规范（色彩/字号/密度/暗色/组件验收）
+- [docs/UI-AUDIT.md](docs/UI-AUDIT.md) — UI/UX 审计与优化方案（含 v0.1.3 实施结果）
+- [docs/api-contracts.md](docs/api-contracts.md) — ModelScope / HuggingFace API 实测结论（含证据）
+- [docs/QA-REPORT.md](docs/QA-REPORT.md) — 端到端验收报告（含 v0.1.3 托盘/通知/暗色复验）
+- [docs/BACKEND-REVIEW.md](docs/BACKEND-REVIEW.md) — 后端独立审查与残余风险清单
+- [design-system/model-download-manager/MASTER.md](design-system/model-download-manager/MASTER.md) — 设计系统基线
+
+## 验收状态（v0.2.0）
+
+| 验证项 | 结果 |
+|--------|------|
+| 前端类型检查 / 生产构建 | ✅ `tsc --noEmit`、`vite build`（JS 344.77 kB / CSS 145.19 kB，字体 98 个 woff2 共 4.28 MB） |
+| 后端测试 | ✅ **79/79 全绿**（62 单元 + 17 集成，含分段下载、旧 part 转换、revision、多根、分类、续传/重试、通知） |
+| 前端任务合并 / 状态单测 | ✅ **20/20**（`npm run test:frontend`，含「过期 queued 响应覆盖 active」竞态回归） |
+| 设计令牌 / UI 规则 | ✅ `check-contrast.mjs`（light/dark 全 AA）、`check-ui-rules.mjs` **0 违规** |
+| **多连接分段下载（v0.2.0）** | ✅ 22/22：4 连接 sha256=curl、并发 Range 请求、暂停续传、不支持 Range 自动回退单流 |
+| **旧断点无损兼容** | ✅ 大文件旧单流断点升级后不重下：前缀指纹一致、chunks 生成、续传正常（个人任务信息省略） |
+| **真实提速实测** | ✅ 同一文件：单连接 12.6 MB/s → 4 连接 **平均 41.44 MB/s、峰值 80.31 MB/s**（3.3×/6.4×） |
+| 多扫描根 / revision / 通知 | ✅ 33/33：多根持久化与树分组、非默认 revision 路径/去重/自定义、Windows 通知实拍 |
+| 回归 | ✅ download 61/61、library 44/44、classification 37/37、ui-v013 38/38；本地目录扫描与分类回归通过（个人目录统计省略） |
+| NSIS 安装包 | ✅ 静默安装 → 启动（version=0.2.0）→ 卸载 全通过 |
+
+交付产物（v0.2.0）：
+- 安装包：`src-tauri\target\release\bundle\nsis\Model Download Manager_0.2.0_x64-setup.exe`（6.50 MiB，SHA256 `A62D1E8B29D211EA87C88C9050020E229072E876987380F08CFFEFD196F156CD`）
+- 免安装：`src-tauri\target\release\model-download-manager.exe`（9.73 MiB，SHA256 `1E3822534165187B986CF28BB7F5DB9D00FE13F74DB92B338942658A383E9A4B`）
+
+## 更新日志
+
+### v0.2.0
+
+- **单文件多连接分段下载**：设置「单文件连接数 1–8」默认 4；16 MiB 分块 + Range 并行、连接池、按块重试、暂停/取消/限速/进度与单流一致；不支持 Range/小文件/未知大小自动回退单流；**旧单流 `.part` 断点无损转分段继续**
+- **实测提速**：ModelScope CDN 单连接 12.6 MB/s → 4 连接平均 41.44 MB/s、峰值 80.31 MB/s（同文件）；总连接数 ≈ 并发任务数 × 单文件连接数
+- **本地库多扫描根目录**：下载目录 + 最多 8 个附加模型目录，根管理面板（添加/移除/统计/打开）、多根树节点、跨根统计；`LocalFile.rootDir`
+- **revision 选择**：仓库详情可选择默认/分支/标签/自定义 revision 并重新加载文件；下载请求携带 revision；非默认 revision 落盘到 `{repoId}/{revision}/{path}`（默认 revision 路径与旧版完全一致）
+- **通知点击跳转**：点击 Windows 通知正文显示并聚焦主窗口（Windows toast 在屏时生效；托盘左键始终可用）
+- 契约/命令新增：Settings `connectionsPerFile`/`libraryRoots`、任务/请求 `revision`、命令 21 `list_revisions`、契约 §5.8
+- 测试：后端 79/79（+22 新用例）、前端 20/20；新增 `resume-compat-v020`/`segment-v020`/`features-v020` 验收脚本
+
+### v0.1.4
+
+- **修复下载状态竞态**：`start_downloads` 返回的「排队中」快照可能晚于调度器的 `active` 事件到达前端，把状态覆盖回 queued，导致任务实际在下载但界面显示「排队中 / 0 B/s / 等待空闲并发槽」。修复：前端状态合并拒绝过期降级（active/pausing 不被 queued 覆盖、completed 为终态），并对 queued 任务的进度事件做**自愈**（收到前进进度即恢复 active）
+- 新增 `src/lib/taskMerge.ts`（纯函数）+ `tests/frontend/task-merge.test.ts`（20 个回归用例，覆盖本次竞态）；新增 `npm run test:frontend`、`npm run check:ui` 脚本
+
+### v0.1.3
+
+- **UI/UX 审计落地（Phase 0–3）**：语义设计令牌（light/dark）、12px 最小字号与 AA 对比度、统一密度（顶栏 60 / 状态栏 28 / 侧栏 240 / 表格行 40）、扁平化组件、焦点环与全局键盘可达
+- **暗色模式**：浅色 / 深色 / 跟随系统，重启保持、首帧不闪白；内置 Noto Sans SC 可变字体（离线）
+- **托盘后台下载**：关闭窗口继续下载，单实例再次启动唤起窗口，托盘菜单显示/暂停全部/继续全部/退出，退出前暂停并落盘
+- **系统通知**：下载完成/失败 Windows 通知（可关闭），应用内 Toast 带打开位置/重试操作
+- **交互**：KeepAlive 页面状态保留、Skip link、路由焦点与播报、全局快捷键与帮助浮层、错误摘要、路径中间省略+复制、超长任务列表上限渲染
+- **设置**：新增外观分组（主题/托盘/系统通知），保存条改为内联不遮挡
+
+### v0.1.2
+
+- 文件类型识别扩展：新增「投影器（mmproj）」与「权重矩阵（imatrix）」；`.hgn` 等特殊权重正确识别；`mmproj_config.json` 等不被误判
+
+### v0.1.1
+
+- 本地模型库重构为「文件管理器式目录树」，历史模型可按真实目录浏览
+
+### v0.1.0
+
+- 首个版本：双数据源浏览、多选下载、断点续传、任务队列、本地库、Token/镜像/代理设置
+
+## 已知限制（v0.2.0）
+
+- 多连接分段下载仅在远端支持 Range（且文件大小已知）时生效；小文件 / 不支持 Range 的源自动回退单连接（无提速）。ModelScope 公开 API 无 revision 列表（UI 提供自定义 revision 文本）；HF 镜像 `/refs` 可用。
+- 多连接模式会把 `.part` **预分配为完整文件大小**（磁盘可用空间会先减少，完成/取消后释放）；35GB 文件约占用 35GB 临时空间，请留意磁盘余量。
+- 升级时旧单流断点优先保留已下载前缀继续（即使 etag 漂移也不重下）；若远端文件确实已变化，需取消任务并清理 `.part` 后重新下载。
+- 非默认 revision 的下载会多一层 revision 目录（如 `...\org\model\v1.0\...`）；默认 revision 路径与旧版完全一致。
+- 暂停 / 取消在 TCP 连接建立阶段需等待连接超时（最长约 30s）才生效；数据流阶段为毫秒级。
+- 强制结束进程（任务管理器）可能丢失最近最多 2 秒的任务状态；重启后未完成任务按暂停恢复（分段模式下已完成块不丢）。
+- 托盘常驻期间只有一个实例；需要完全退出请使用托盘菜单「退出」（关闭窗口默认隐藏）。
+- 系统通知显示受 Windows 通知设置/勿扰模式影响；**点击通知跳转仅在 toast 仍在屏幕时有效**（平台限制），托盘左键点击始终可唤起窗口；Linux/macOS 未做专项验证。
+- `settings.json` 中 Token 为本地明文存储（仅保存在本机用户目录，不会外传）。
+- 本地库的展开状态/搜索条件在应用重启后不持久化（页面内切换保留）。
+- 为离线可用内置了 Noto Sans SC 可变字体，安装包因此增大约 1.5 MB（总计 6.50 MiB）。
+
+## 技术栈
+
+Tauri 2（Rust，托盘/单实例/系统通知/tokio 多连接分段下载）+ React 18 + TypeScript + Tailwind CSS + zustand；
+下载引擎基于 tokio + reqwest 流式写入（v0.2.0 起支持单文件多连接 Range 分段）；字体 Noto Sans SC Variable（@fontsource）。
+
+## 许可
+
+[MIT](LICENSE)
+
+## 公开资料维护
+
+发布前运行 `npm run check:public`，检查个人主目录路径、常见凭据、运行数据和截图链接。该检查不能替代截图目视复核。
+
+公开图库使用 `scripts/capture-public-screenshots.mjs` 连接专用浏览器与本地 Vite 服务，仅允许 Mock 模式。真实应用截图默认保存在 `.temp/private-screenshots`，不应提交到公开仓库。
+
+旧断点真机验收脚本要求显式传入 `--repo`、`--file`、`--total` 和 `--baseline-mbps`；只使用已备份的测试任务。

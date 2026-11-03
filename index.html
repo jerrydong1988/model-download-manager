@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 首帧主题：按 localStorage 缓存设置（key 与 src/lib/theme.ts 一致），避免暗色闪白 -->
+    <script>
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('mdm.theme')
+          var setting =
+            stored === 'dark' || stored === 'light' || stored === 'system'
+              ? stored
+              : 'light'
+          var resolved =
+            setting === 'system'
+              ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : setting
+          document.documentElement.dataset.theme = resolved
+          document.documentElement.style.colorScheme = resolved
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+    <meta name="color-scheme" content="light dark" />
+    <title>模型下载管理器</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

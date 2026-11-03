@@ -1,0 +1,44 @@
+[package]
+name = "model-download-manager"
+version = "0.2.0"
+description = "ModelScope / HuggingFace 模型下载管理器"
+authors = ["jerrydong1988"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "model_download_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# v0.1.3：main.rs 没有单元测试；禁用其 test harness，避免该 harness 在无 Windows manifest
+# 的情况下链接 tauri 托盘/菜单代码而触发 loader 失败（comctl32 v6 专有导出）。
+[[bin]]
+name = "model-download-manager"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip"] }
+futures-util = "0.3"
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+percent-encoding = "2"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

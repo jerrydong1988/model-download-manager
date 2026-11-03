@@ -1,0 +1,37 @@
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+vendor/
+
+# Frontend build
+dist/
+dist-ssr/
+
+# Rust / Tauri build
+src-tauri/target/
+src-tauri/gen/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.local
+
+# Scratch
+.temp/
+test-results/
+playwright-report/
+
+# Local credentials and application runtime data
+.env
+.env.*
+!.env.example
+settings.json
+tasks.json
+*.part
+*.part.json

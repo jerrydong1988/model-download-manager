@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI 组件预览 · 模型下载管理器</title>
+    <script>
+      ;(function () {
+        try {
+          var params = new URLSearchParams(location.search)
+          var requested = params.get('theme')
+          var stored = localStorage.getItem('mdm.theme')
+          var setting =
+            requested === 'dark' || requested === 'light'
+              ? requested
+              : stored === 'dark' || stored === 'light' || stored === 'system'
+                ? stored
+                : 'light'
+          var resolved =
+            setting === 'system'
+              ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : setting
+          document.documentElement.dataset.theme = resolved
+          document.documentElement.style.colorScheme = resolved
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/assets/ui-preview.tsx"></script>
+  </body>
+</html>

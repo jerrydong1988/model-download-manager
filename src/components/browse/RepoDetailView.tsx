@@ -544,7 +544,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
               }
             />
 
-            <div className={cx('selection-shelf flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
+            <div data-action-shelf className={cx('selection-shelf flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
               <div className="flex min-w-0 items-center gap-2">
                 <FolderOpen className="h-4 w-4 shrink-0 text-fg-muted" aria-hidden="true" />
                 <span className="shrink-0 text-meta text-fg-secondary">保存到</span>

@@ -956,7 +956,7 @@ export default function SettingsPage() {
         </div>
       </div>
         {/* 保存区占独立布局空间，始终可见且不覆盖字段。 */}
-        <section className="workspace-inset flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface py-4">
+        <section data-action-shelf className="workspace-inset flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface py-4">
           <div className="flex items-center gap-2">
             <span
               className={cx('h-1.5 w-1.5 rounded-full', dirty ? 'bg-warning' : 'bg-success')}

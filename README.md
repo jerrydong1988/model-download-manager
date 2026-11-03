@@ -10,33 +10,21 @@ v0.2.0 新增**单文件多连接分段下载**（实测 4 连接提速 3.3–6.
 
 > 项目从 `LlamaServerManager` 的下载模块中抽取、重构而来，本工具只专注「模型下载」这一件事。
 
-> 下列截图均由浏览器 Mock 模式生成，使用虚构示例路径与演示文件，不展示本机模型库或访问凭据。
+> 下列截图展示当前开发分支的雾白界面，可能先于最新正式版。均由浏览器 Mock 模式生成，使用虚构示例路径与演示文件，不展示本机模型库或访问凭据。
 
-![浏览仓库（浅色）](docs/screenshots/01-browse.png)
+![浏览仓库（浅色）](docs/screenshots/ui-browse.jpg)
 
 | 下载队列 | 本地模型库（演示数据） |
 | --- | --- |
-| ![下载队列](docs/screenshots/02-downloads.png) | ![本地模型库](docs/screenshots/03-library.png) |
+| ![下载队列](docs/screenshots/ui-downloads.jpg) | ![本地模型库](docs/screenshots/ui-library.jpg) |
 
 | 仓库文件选择 | 设置（外观/托盘/通知） |
 | --- | --- |
-| ![仓库详情](docs/screenshots/05-repo-detail.png) | ![设置](docs/screenshots/04-settings.png) |
+| ![仓库详情](docs/screenshots/ui-files.jpg) | ![设置](docs/screenshots/ui-settings.jpg) |
 
-| 暗色 · 浏览仓库 | 暗色 · 本地模型库 |
+| 暗色 · 浏览仓库 | 仓库 revision 选择 |
 | --- | --- |
-| ![暗色浏览](docs/screenshots/dark-01-browse.png) | ![暗色本地库](docs/screenshots/dark-03-library.png) |
-
-| 暂停/续传 | 全局快捷键帮助 |
-| --- | --- |
-| ![暂停续传](docs/screenshots/06-paused-resume.png) | ![快捷键](docs/screenshots/07-shortcuts-help.png) |
-
-| 本地库多扫描根目录 | 仓库 revision 选择 |
-| --- | --- |
-| ![多扫描根](docs/screenshots/11-library-multiroot.png) | ![revision 选择](docs/screenshots/12-revision-selector.png) |
-
-| 下载引擎设置（连接数/并发/限速） | 任务 revision 徽章 |
-| --- | --- |
-| ![下载引擎设置](docs/screenshots/13-settings-engine.png) | ![任务 revision](docs/screenshots/14-task-revision-badge.png) |
+| ![暗色浏览](docs/screenshots/ui-dark.jpg) | ![revision 选择](docs/screenshots/ui-revision.jpg) |
 
 ## 功能特性
 
@@ -140,12 +128,13 @@ tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构、模块所有权、可测试性要求
 - [docs/IPC-CONTRACT.md](docs/IPC-CONTRACT.md) — 前后端 IPC 契约（命令 / 事件 / 类型 / 设置 / 托盘语义）
-- [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md) — 设计令牌与 UI 实现规范（色彩/字号/密度/暗色/组件验收）
+- [DESIGN.md](DESIGN.md) — 当前设计系统（配色、字体、布局、交互与无障碍）
+- [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md) — 设计令牌与实现位置索引
 - [docs/UI-AUDIT.md](docs/UI-AUDIT.md) — UI/UX 审计与优化方案（含 v0.1.3 实施结果）
 - [docs/api-contracts.md](docs/api-contracts.md) — ModelScope / HuggingFace API 实测结论（含证据）
 - [docs/QA-REPORT.md](docs/QA-REPORT.md) — 端到端验收报告（含 v0.1.3 托盘/通知/暗色复验）
 - [docs/BACKEND-REVIEW.md](docs/BACKEND-REVIEW.md) — 后端独立审查与残余风险清单
-- [design-system/model-download-manager/MASTER.md](design-system/model-download-manager/MASTER.md) — 设计系统基线
+- [design-system/model-download-manager/MASTER.md](design-system/model-download-manager/MASTER.md) — 历史设计系统基线
 
 ## 验收状态（v0.2.0）
 

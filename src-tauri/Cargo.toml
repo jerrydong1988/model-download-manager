@@ -1,6 +1,6 @@
 [package]
 name = "model-download-manager"
-version = "0.2.1"
+version = "0.3.0"
 description = "ModelScope / HuggingFace 模型下载管理器"
 authors = ["jerrydong1988"]
 license = "MIT"

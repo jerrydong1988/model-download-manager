@@ -1,0 +1,15 @@
+{
+  "capturedOn": "2026-11-04",
+  "source": "Model Download Manager browser preview with ?mock=1",
+  "data": "Synthetic repository, download and library fixtures; no personal files or credentials",
+  "implementationCommit": "8f95edc559887c6c1298f86afeb600111740fbb5",
+  "images": [
+    { "file": "ui-browse.jpg", "viewport": [1440, 900], "state": "Browse, light" },
+    { "file": "ui-downloads.jpg", "viewport": [1440, 900], "state": "Download queue, light" },
+    { "file": "ui-library.jpg", "viewport": [1440, 900], "state": "Local library, light" },
+    { "file": "ui-settings.jpg", "viewport": [1440, 900], "state": "Settings, light" },
+    { "file": "ui-files.jpg", "viewport": [1440, 900], "state": "Repository files with selection, light" },
+    { "file": "ui-dark.jpg", "viewport": [1440, 900], "state": "Browse, dark" },
+    { "file": "ui-revision.jpg", "viewport": [1040, 680], "state": "Revision selector, light" }
+  ]
+}

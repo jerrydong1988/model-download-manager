@@ -7,38 +7,29 @@
 v0.1.3 起支持**暗色模式、托盘后台下载、系统通知、全局快捷键**，并完成整套 UI/UX 审计落地（Token 化、密度、无障碍）。
 v0.1.4 修复下载任务状态竞态（任务实际在下载但队列显示「排队中 / 0 B/s」的问题）。
 v0.2.0 新增**单文件多连接分段下载**（实测 4 连接提速 3.3–6.4 倍）、**多扫描根目录**、**仓库 revision（分支/标签）选择**、**通知点击跳转主窗口**。
+v0.3.0 更新**雾白／石墨界面**与 **70 枚统一图标**，优化「浏览仓库 → 选择文件 → 批量下载」操作流程。
 
 > 项目从 `LlamaServerManager` 的下载模块中抽取、重构而来，本工具只专注「模型下载」这一件事。
 
-> 下列截图均由浏览器 Mock 模式生成，使用虚构示例路径与演示文件，不展示本机模型库或访问凭据。
+> 下列截图展示雾白界面布局，部分采集于图标更新前。均由浏览器 Mock 模式生成，使用虚构示例路径与演示文件，不展示本机模型库或访问凭据。最新图标见 [完整图标目录](assets/icons/README.md)。
 
-![浏览仓库（浅色）](docs/screenshots/01-browse.png)
+![浏览仓库（浅色）](docs/screenshots/ui-browse.jpg)
 
 | 下载队列 | 本地模型库（演示数据） |
 | --- | --- |
-| ![下载队列](docs/screenshots/02-downloads.png) | ![本地模型库](docs/screenshots/03-library.png) |
+| ![下载队列](docs/screenshots/ui-downloads.jpg) | ![本地模型库](docs/screenshots/ui-library.jpg) |
 
 | 仓库文件选择 | 设置（外观/托盘/通知） |
 | --- | --- |
-| ![仓库详情](docs/screenshots/05-repo-detail.png) | ![设置](docs/screenshots/04-settings.png) |
+| ![仓库详情](docs/screenshots/ui-files.jpg) | ![设置](docs/screenshots/ui-settings.jpg) |
 
-| 暗色 · 浏览仓库 | 暗色 · 本地模型库 |
+| 暗色 · 浏览仓库 | 仓库 revision 选择 |
 | --- | --- |
-| ![暗色浏览](docs/screenshots/dark-01-browse.png) | ![暗色本地库](docs/screenshots/dark-03-library.png) |
-
-| 暂停/续传 | 全局快捷键帮助 |
-| --- | --- |
-| ![暂停续传](docs/screenshots/06-paused-resume.png) | ![快捷键](docs/screenshots/07-shortcuts-help.png) |
-
-| 本地库多扫描根目录 | 仓库 revision 选择 |
-| --- | --- |
-| ![多扫描根](docs/screenshots/11-library-multiroot.png) | ![revision 选择](docs/screenshots/12-revision-selector.png) |
-
-| 下载引擎设置（连接数/并发/限速） | 任务 revision 徽章 |
-| --- | --- |
-| ![下载引擎设置](docs/screenshots/13-settings-engine.png) | ![任务 revision](docs/screenshots/14-task-revision-badge.png) |
+| ![暗色浏览](docs/screenshots/ui-dark.jpg) | ![revision 选择](docs/screenshots/ui-revision.jpg) |
 
 ## 功能特性
+
+图标系统包含 **70 枚统一 SVG（12 枚原创品牌／业务图形 + 58 枚 Lucide 通用图形）**，配套应用、托盘、PNG 和 Windows ICO 资源。参见[图标资源与用法](assets/icons/README.md)、[浅色总览](assets/icons/catalog-light.jpg)及[深色总览](assets/icons/catalog-dark.jpg)。
 
 - **双数据源浏览**：HuggingFace / ModelScope 仓库搜索（分页加载）、仓库文件树浏览，自动分类为 权重 / 投影器 / 权重矩阵 / 配置 / 其他（`.hgn` 等特殊权重、`mmproj` 投影器、`imatrix` 矩阵均正确识别）；仓库详情支持 **revision 选择**（默认 / 分支 / 标签 / 自定义，v0.2.0）
 - **多选下载**：文件树多选，默认全选模型文件（权重 + 投影器），实时显示选中合计大小
@@ -93,7 +84,7 @@ cd src-tauri; cargo test # 后端单元 + 本地 HTTP 集成回归（CI 运行�
 ```powershell
 npm run tauri:build
 # 免安装可执行文件：src-tauri\target\release\model-download-manager.exe
-# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.2.0_x64-setup.exe
+# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.3.0_x64-setup.exe
 ```
 
 ## 使用说明
@@ -140,12 +131,13 @@ tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构、模块所有权、可测试性要求
 - [docs/IPC-CONTRACT.md](docs/IPC-CONTRACT.md) — 前后端 IPC 契约（命令 / 事件 / 类型 / 设置 / 托盘语义）
-- [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md) — 设计令牌与 UI 实现规范（色彩/字号/密度/暗色/组件验收）
+- [DESIGN.md](DESIGN.md) — 当前设计系统（配色、字体、布局、交互与无障碍）
+- [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md) — 设计令牌与实现位置索引
 - [docs/UI-AUDIT.md](docs/UI-AUDIT.md) — UI/UX 审计与优化方案（含 v0.1.3 实施结果）
 - [docs/api-contracts.md](docs/api-contracts.md) — ModelScope / HuggingFace API 实测结论（含证据）
 - [docs/QA-REPORT.md](docs/QA-REPORT.md) — 端到端验收报告（含 v0.1.3 托盘/通知/暗色复验）
 - [docs/BACKEND-REVIEW.md](docs/BACKEND-REVIEW.md) — 后端独立审查与残余风险清单
-- [design-system/model-download-manager/MASTER.md](design-system/model-download-manager/MASTER.md) — 设计系统基线
+- [design-system/model-download-manager/MASTER.md](design-system/model-download-manager/MASTER.md) — 历史设计系统基线
 
 ## 验收状态（v0.2.0）
 
@@ -168,11 +160,19 @@ tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
 
 ## 更新日志
 
+### v0.3.0
+
+- 重设计浏览仓库、文件选择、下载队列、本地模型库与设置页面，采用雾白／石墨底色和蓝紫强调色。
+- 文件选择突出整行状态，批量下载与设置操作保持可见；应用内通知自动避让底部操作区。
+- 统一 70 枚界面图标（12 枚原创、58 枚 Lucide），更新应用、安装包、托盘与网页图标，提供 SVG／PNG／ICO 资源及离线预览。
+- 保留浅色／深色／跟随系统、快捷键及现有下载功能；沿用 v0.2.1 的配置、任务和文件路径，无新增数据迁移。
+- 发布附件由远端 Windows CI 完成测试、编译、打包和 SHA-256 校验。
+
 ### v0.2.1
 
 - 修复功能审计发现的 11 项问题：下载完整性、路径冲突、限速卡死、停滞连接控制、revision 选择、快照与进度同步、磁盘根目录、SOCKS 代理。
 - 新增 Windows CI 测试、编译、打包和稳定版发布，构建全部在 GitHub Actions 执行。
-- 详细变更及升级兼容说明见 [发布说明](docs/RELEASE-NOTES.md)。
+- 详细变更及升级兼容说明见 [v0.2.1 发布说明](https://github.com/jerrydong1988/model-download-manager/releases/tag/v0.2.1)。
 
 ### v0.2.0
 
@@ -210,7 +210,7 @@ tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
 
 - 首个版本：双数据源浏览、多选下载、断点续传、任务队列、本地库、Token/镜像/代理设置
 
-## 已知限制（v0.2.1）
+## 已知限制（v0.3.0）
 
 - 多连接分段下载仅在远端支持 Range（且文件大小已知）时生效；小文件 / 不支持 Range 的源自动回退单连接（无提速）。ModelScope 公开 API 无 revision 列表（UI 提供自定义 revision 文本）；HF 镜像 `/refs` 可用。
 - 多连接模式会把 `.part` **预分配为完整文件大小**（磁盘可用空间会先减少，完成/取消后释放）；35GB 文件约占用 35GB 临时空间，请留意磁盘余量。
@@ -222,7 +222,7 @@ tests/e2e/            端到端验收脚本（CDP 驱动真实应用）
 - 系统通知显示受 Windows 通知设置/勿扰模式影响；**点击通知跳转仅在 toast 仍在屏幕时有效**（平台限制），托盘左键点击始终可唤起窗口；Linux/macOS 未做专项验证。
 - `settings.json` 中 Token 为本地明文存储（仅保存在本机用户目录，不会外传）。
 - 本地库的展开状态/搜索条件在应用重启后不持久化（页面内切换保留）。
-- 为离线可用内置了 Noto Sans SC 可变字体，安装包因此增大约 1.5 MB（总计 6.50 MiB）。
+- 为离线可用内置了 Noto Sans SC 可变字体；安装包实际大小以发布附件为准。
 
 ## 技术栈
 

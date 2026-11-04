@@ -1,5 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '../icons'
 import { cx } from '../../lib/cx'
 
 export type ButtonVariant =
@@ -9,7 +9,7 @@ export type ButtonVariant =
   | 'danger'
   | 'dangerGhost'
   | 'subtle'
-export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm'
+export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'icon' | 'icon-sm'
 
 const BASE =
   'inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-control border font-medium transition-colors duration-micro disabled:cursor-not-allowed disabled:opacity-50'
@@ -18,7 +18,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary:
     'border-transparent bg-primary text-primary-on hover:bg-primary-hover active:bg-primary-hover',
   secondary:
-    'border-line-strong bg-surface text-fg hover:bg-surface-2 active:bg-surface-3',
+    'border-line bg-surface text-fg hover:bg-surface-2 active:bg-surface-3',
   ghost:
     'border-transparent bg-transparent text-fg-secondary hover:bg-surface-2 hover:text-fg active:bg-surface-3',
   danger:
@@ -34,6 +34,7 @@ const SIZE: Record<ButtonSize, string> = {
   sm: 'h-sm px-3 text-meta',
   md: 'h-md px-3.5 text-body',
   lg: 'h-lg px-4 text-body',
+  xl: 'h-12 px-6 text-body',
   icon: 'h-9 w-9 p-0',
   'icon-sm': 'h-9 w-9 p-0',
 }

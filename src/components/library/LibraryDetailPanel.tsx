@@ -8,7 +8,7 @@ import {
   Projector,
   Trash2,
   X,
-} from 'lucide-react'
+} from '../icons'
 import type { LibraryFileEntry } from '../../lib/libraryTree'
 import { formatBytes, formatDateTime, formatRelativeTime } from '../../lib/format'
 import { useAppStore } from '../../store/appStore'

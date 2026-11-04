@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy } from '../icons'
 import { Button } from './Button'
 import { cx } from '../../lib/cx'
 

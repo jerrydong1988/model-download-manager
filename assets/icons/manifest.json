@@ -1,0 +1,573 @@
+{
+  "grid": 24,
+  "strokeWidth": 1.75,
+  "linecap": "round",
+  "linejoin": "round",
+  "icons": [
+    {
+      "name": "Activity",
+      "label": "传输活动",
+      "group": "下载与状态",
+      "file": "ui/activity.svg",
+      "darkFile": "ui-dark/activity.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "AlertCircle",
+      "label": "错误",
+      "group": "下载与状态",
+      "file": "ui/alert-circle.svg",
+      "darkFile": "ui-dark/alert-circle.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "AlertTriangle",
+      "label": "警告",
+      "group": "下载与状态",
+      "file": "ui/alert-triangle.svg",
+      "darkFile": "ui-dark/alert-triangle.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ArrowDown",
+      "label": "向下",
+      "group": "操作与导航",
+      "file": "ui/arrow-down.svg",
+      "darkFile": "ui-dark/arrow-down.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ArrowLeft",
+      "label": "返回",
+      "group": "操作与导航",
+      "file": "ui/arrow-left.svg",
+      "darkFile": "ui-dark/arrow-left.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ArrowRight",
+      "label": "进入",
+      "group": "操作与导航",
+      "file": "ui/arrow-right.svg",
+      "darkFile": "ui-dark/arrow-right.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Boxes",
+      "label": "模型权重",
+      "group": "模型与文件",
+      "file": "ui/boxes.svg",
+      "darkFile": "ui-dark/boxes.svg",
+      "origin": "project"
+    },
+    {
+      "name": "BrandMark",
+      "label": "应用标识",
+      "group": "导航与品牌",
+      "file": "ui/brand-mark.svg",
+      "darkFile": "ui-dark/brand-mark.svg",
+      "origin": "project"
+    },
+    {
+      "name": "CalendarDays",
+      "label": "更新时间",
+      "group": "设置与元数据",
+      "file": "ui/calendar-days.svg",
+      "darkFile": "ui-dark/calendar-days.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Check",
+      "label": "勾选",
+      "group": "操作与导航",
+      "file": "ui/check.svg",
+      "darkFile": "ui-dark/check.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "CheckCheck",
+      "label": "批量选择",
+      "group": "下载与状态",
+      "file": "ui/check-check.svg",
+      "darkFile": "ui-dark/check-check.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "CheckCircle2",
+      "label": "已完成",
+      "group": "下载与状态",
+      "file": "ui/check-circle2.svg",
+      "darkFile": "ui-dark/check-circle2.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ChevronDown",
+      "label": "展开",
+      "group": "操作与导航",
+      "file": "ui/chevron-down.svg",
+      "darkFile": "ui-dark/chevron-down.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ChevronRight",
+      "label": "下一层",
+      "group": "操作与导航",
+      "file": "ui/chevron-right.svg",
+      "darkFile": "ui-dark/chevron-right.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ChevronsDown",
+      "label": "全部展开",
+      "group": "操作与导航",
+      "file": "ui/chevrons-down.svg",
+      "darkFile": "ui-dark/chevrons-down.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ChevronsUp",
+      "label": "全部折叠",
+      "group": "操作与导航",
+      "file": "ui/chevrons-up.svg",
+      "darkFile": "ui-dark/chevrons-up.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "CircleArrowDown",
+      "label": "下载中",
+      "group": "下载与状态",
+      "file": "ui/circle-arrow-down.svg",
+      "darkFile": "ui-dark/circle-arrow-down.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "CirclePause",
+      "label": "已暂停",
+      "group": "下载与状态",
+      "file": "ui/circle-pause.svg",
+      "darkFile": "ui-dark/circle-pause.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "CircleX",
+      "label": "已取消",
+      "group": "下载与状态",
+      "file": "ui/circle-x.svg",
+      "darkFile": "ui-dark/circle-x.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Clock",
+      "label": "等待",
+      "group": "下载与状态",
+      "file": "ui/clock.svg",
+      "darkFile": "ui-dark/clock.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Command",
+      "label": "组合快捷键",
+      "group": "设置与元数据",
+      "file": "ui/command.svg",
+      "darkFile": "ui-dark/command.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Compass",
+      "label": "浏览仓库",
+      "group": "导航与品牌",
+      "file": "ui/compass.svg",
+      "darkFile": "ui-dark/compass.svg",
+      "origin": "project"
+    },
+    {
+      "name": "Copy",
+      "label": "复制",
+      "group": "操作与导航",
+      "file": "ui/copy.svg",
+      "darkFile": "ui-dark/copy.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Download",
+      "label": "下载",
+      "group": "下载与状态",
+      "file": "ui/download.svg",
+      "darkFile": "ui-dark/download.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "DownloadQueue",
+      "label": "下载队列",
+      "group": "导航与品牌",
+      "file": "ui/download-queue.svg",
+      "darkFile": "ui-dark/download-queue.svg",
+      "origin": "project"
+    },
+    {
+      "name": "Eye",
+      "label": "显示",
+      "group": "设置与元数据",
+      "file": "ui/eye.svg",
+      "darkFile": "ui-dark/eye.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "EyeOff",
+      "label": "隐藏",
+      "group": "设置与元数据",
+      "file": "ui/eye-off.svg",
+      "darkFile": "ui-dark/eye-off.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FileCog",
+      "label": "配置文件",
+      "group": "模型与文件",
+      "file": "ui/file-cog.svg",
+      "darkFile": "ui-dark/file-cog.svg",
+      "origin": "project"
+    },
+    {
+      "name": "FileQuestion",
+      "label": "未知文件",
+      "group": "模型与文件",
+      "file": "ui/file-question.svg",
+      "darkFile": "ui-dark/file-question.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FileText",
+      "label": "文本文件",
+      "group": "模型与文件",
+      "file": "ui/file-text.svg",
+      "darkFile": "ui-dark/file-text.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FlaskConical",
+      "label": "演示模式",
+      "group": "设置与元数据",
+      "file": "ui/flask-conical.svg",
+      "darkFile": "ui-dark/flask-conical.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Folder",
+      "label": "目录",
+      "group": "模型与文件",
+      "file": "ui/folder.svg",
+      "darkFile": "ui-dark/folder.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FolderOpen",
+      "label": "打开目录",
+      "group": "模型与文件",
+      "file": "ui/folder-open.svg",
+      "darkFile": "ui-dark/folder-open.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FolderPlus",
+      "label": "添加目录",
+      "group": "操作与导航",
+      "file": "ui/folder-plus.svg",
+      "darkFile": "ui-dark/folder-plus.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FolderSearch",
+      "label": "定位文件",
+      "group": "操作与导航",
+      "file": "ui/folder-search.svg",
+      "darkFile": "ui-dark/folder-search.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "FolderTree",
+      "label": "扫描根目录",
+      "group": "模型与文件",
+      "file": "ui/folder-tree.svg",
+      "darkFile": "ui-dark/folder-tree.svg",
+      "origin": "project"
+    },
+    {
+      "name": "Gauge",
+      "label": "传输速度",
+      "group": "下载与状态",
+      "file": "ui/gauge.svg",
+      "darkFile": "ui-dark/gauge.svg",
+      "origin": "project"
+    },
+    {
+      "name": "GitBranch",
+      "label": "分支与版本",
+      "group": "模型与文件",
+      "file": "ui/git-branch.svg",
+      "darkFile": "ui-dark/git-branch.svg",
+      "origin": "project"
+    },
+    {
+      "name": "Globe",
+      "label": "网络",
+      "group": "设置与元数据",
+      "file": "ui/globe.svg",
+      "darkFile": "ui-dark/globe.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Grid3x3",
+      "label": "权重矩阵",
+      "group": "模型与文件",
+      "file": "ui/grid3x3.svg",
+      "darkFile": "ui-dark/grid3x3.svg",
+      "origin": "project"
+    },
+    {
+      "name": "HardDrive",
+      "label": "存储空间",
+      "group": "模型与文件",
+      "file": "ui/hard-drive.svg",
+      "darkFile": "ui-dark/hard-drive.svg",
+      "origin": "project"
+    },
+    {
+      "name": "Heart",
+      "label": "点赞",
+      "group": "设置与元数据",
+      "file": "ui/heart.svg",
+      "darkFile": "ui-dark/heart.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Inbox",
+      "label": "空队列",
+      "group": "下载与状态",
+      "file": "ui/inbox.svg",
+      "darkFile": "ui-dark/inbox.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Info",
+      "label": "信息",
+      "group": "下载与状态",
+      "file": "ui/info.svg",
+      "darkFile": "ui-dark/info.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "KeyRound",
+      "label": "访问凭据",
+      "group": "设置与元数据",
+      "file": "ui/key-round.svg",
+      "darkFile": "ui-dark/key-round.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Keyboard",
+      "label": "键盘快捷键",
+      "group": "设置与元数据",
+      "file": "ui/keyboard.svg",
+      "darkFile": "ui-dark/keyboard.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Library",
+      "label": "本地模型库",
+      "group": "导航与品牌",
+      "file": "ui/library.svg",
+      "darkFile": "ui-dark/library.svg",
+      "origin": "project"
+    },
+    {
+      "name": "ListTree",
+      "label": "任务分组",
+      "group": "操作与导航",
+      "file": "ui/list-tree.svg",
+      "darkFile": "ui-dark/list-tree.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Loader2",
+      "label": "加载中",
+      "group": "下载与状态",
+      "file": "ui/loader2.svg",
+      "darkFile": "ui-dark/loader2.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Minus",
+      "label": "减少",
+      "group": "操作与导航",
+      "file": "ui/minus.svg",
+      "darkFile": "ui-dark/minus.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Monitor",
+      "label": "跟随系统",
+      "group": "设置与元数据",
+      "file": "ui/monitor.svg",
+      "darkFile": "ui-dark/monitor.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Moon",
+      "label": "深色模式",
+      "group": "设置与元数据",
+      "file": "ui/moon.svg",
+      "darkFile": "ui-dark/moon.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Palette",
+      "label": "外观",
+      "group": "设置与元数据",
+      "file": "ui/palette.svg",
+      "darkFile": "ui-dark/palette.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Pause",
+      "label": "暂停",
+      "group": "下载与状态",
+      "file": "ui/pause.svg",
+      "darkFile": "ui-dark/pause.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Pencil",
+      "label": "编辑",
+      "group": "操作与导航",
+      "file": "ui/pencil.svg",
+      "darkFile": "ui-dark/pencil.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Play",
+      "label": "继续",
+      "group": "下载与状态",
+      "file": "ui/play.svg",
+      "darkFile": "ui-dark/play.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Plus",
+      "label": "添加",
+      "group": "操作与导航",
+      "file": "ui/plus.svg",
+      "darkFile": "ui-dark/plus.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Projector",
+      "label": "多模态投影器",
+      "group": "模型与文件",
+      "file": "ui/projector.svg",
+      "darkFile": "ui-dark/projector.svg",
+      "origin": "project"
+    },
+    {
+      "name": "RefreshCw",
+      "label": "刷新",
+      "group": "操作与导航",
+      "file": "ui/refresh-cw.svg",
+      "darkFile": "ui-dark/refresh-cw.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "RotateCcw",
+      "label": "重试",
+      "group": "下载与状态",
+      "file": "ui/rotate-ccw.svg",
+      "darkFile": "ui-dark/rotate-ccw.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Save",
+      "label": "保存",
+      "group": "操作与导航",
+      "file": "ui/save.svg",
+      "darkFile": "ui-dark/save.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Search",
+      "label": "搜索",
+      "group": "操作与导航",
+      "file": "ui/search.svg",
+      "darkFile": "ui-dark/search.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "SearchX",
+      "label": "没有结果",
+      "group": "操作与导航",
+      "file": "ui/search-x.svg",
+      "darkFile": "ui-dark/search-x.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Settings",
+      "label": "设置",
+      "group": "导航与品牌",
+      "file": "ui/settings.svg",
+      "darkFile": "ui-dark/settings.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "ShieldAlert",
+      "label": "需要授权",
+      "group": "设置与元数据",
+      "file": "ui/shield-alert.svg",
+      "darkFile": "ui-dark/shield-alert.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Sun",
+      "label": "浅色模式",
+      "group": "设置与元数据",
+      "file": "ui/sun.svg",
+      "darkFile": "ui-dark/sun.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Tag",
+      "label": "标签",
+      "group": "设置与元数据",
+      "file": "ui/tag.svg",
+      "darkFile": "ui-dark/tag.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Trash2",
+      "label": "删除",
+      "group": "操作与导航",
+      "file": "ui/trash2.svg",
+      "darkFile": "ui-dark/trash2.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "Undo2",
+      "label": "重置",
+      "group": "操作与导航",
+      "file": "ui/undo2.svg",
+      "darkFile": "ui-dark/undo2.svg",
+      "origin": "lucide-0.453.0"
+    },
+    {
+      "name": "X",
+      "label": "关闭",
+      "group": "操作与导航",
+      "file": "ui/x.svg",
+      "darkFile": "ui-dark/x.svg",
+      "origin": "lucide-0.453.0"
+    }
+  ],
+  "brand": [
+    "app-icon.svg",
+    "app-mark.svg",
+    "tray-icon.svg"
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "model-download-manager",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "description": "ModelScope / HuggingFace 模型下载管理器",
   "scripts": {
@@ -15,7 +15,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "icons": "python scripts/gen-icons.py"
+    "icons": "node scripts/gen-icons.mjs",
+    "check:icons": "node scripts/check-icons.mjs"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "^5.3.1",

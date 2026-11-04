@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
-import { Command, Keyboard, X } from 'lucide-react'
+import { Command, Keyboard, X } from '../icons'
 import { Button } from '../ui/Button'
 
 export interface ShortcutsHelpDialogProps {

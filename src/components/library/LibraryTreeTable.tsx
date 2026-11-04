@@ -11,7 +11,7 @@ import {
   Grid3x3,
   Projector,
   Trash2,
-} from 'lucide-react'
+} from '../icons'
 import type {
   LibraryDir,
   LibraryDirRow,
@@ -331,7 +331,8 @@ export function LibraryTreeTable({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-auto">
+      <div className="flex min-h-0 min-w-[640px] flex-1 flex-col">
       <div
         aria-hidden="true"
         className={cx(
@@ -376,6 +377,7 @@ export function LibraryTreeTable({
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

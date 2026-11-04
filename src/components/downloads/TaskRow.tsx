@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '../icons'
 import {
   AlertCircle,
   ArrowDown,
@@ -16,7 +16,7 @@ import {
   RotateCcw,
   Trash2,
   X,
-} from 'lucide-react'
+} from '../icons'
 import type { DownloadTask } from '../../types'
 import {
   defaultRevisionFor,
@@ -270,15 +270,14 @@ export function TaskRow({
     <div
       role="listitem"
       className={cx(
-        'border-b border-line px-4 py-2.5 last:border-b-0',
+        'border-b border-line px-4 py-4 last:border-b-0',
         task.status === 'error' && 'bg-danger/5',
       )}
     >
       <div className="flex items-start gap-3">
         <div
           className={cx(
-            'grid h-9 w-9 shrink-0 place-items-center rounded-control border',
-            visual.tone,
+            'grid h-9 w-9 shrink-0 place-items-center rounded-control bg-surface-2 text-fg-muted',
           )}
           title={visual.label}
         >

@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Search,
   X,
-} from 'lucide-react'
+} from '../icons'
 import type {
   DownloadTask,
   FileKind,
@@ -361,12 +361,10 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
     }
   }
 
-  const virtualized = (detail?.files.length ?? 0) > 200
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="repo-detail flex h-full min-h-0 flex-col overflow-y-auto">
       <div className="shrink-0 border-b border-line bg-surface">
-        <div className="mx-auto w-full max-w-[1280px] px-6 py-3">
+        <div className="workspace-inset py-3">
           <div className="mb-2 flex items-center justify-between gap-3">
             <Button
               variant="ghost"
@@ -460,23 +458,13 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                 >
                   清空选择
                 </Button>
-                <span className="ml-1 text-meta text-fg-secondary">
-                  已选{' '}
-                  <span className="font-semibold tabular-nums text-fg">
-                    {selection.files.length}
-                  </span>{' '}
-                  个文件 · 合计{' '}
-                  <span className="font-semibold tabular-nums text-fg">
-                    {formatBytes(selection.totalSize)}
-                  </span>
-                </span>
               </div>
             </>
           ) : null}
         </div>
       </div>
 
-      <div className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col px-6 py-3">
+      <div className="workspace-inset flex min-h-[300px] flex-1 flex-col py-4 md:min-h-0">
         {status === 'loading' ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface" aria-busy="true">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -540,10 +528,8 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                   />
                 </div>
               </div>
-              <span className="text-meta text-fg-muted">
-                {virtualized
-                  ? `窗口化渲染 · 共 ${detail.files.length} 行`
-                  : `共 ${filteredFiles.length} 个文件`}
+              <span className="hidden text-meta text-fg-muted xl:block">
+                共 {filteredFiles.length} 个文件
               </span>
             </div>
 
@@ -558,14 +544,14 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
               }
             />
 
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface-2/60 px-4 py-2.5">
+            <div data-action-shelf className={cx('selection-shelf flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
               <div className="flex min-w-0 items-center gap-2">
                 <FolderOpen className="h-4 w-4 shrink-0 text-fg-muted" aria-hidden="true" />
                 <span className="shrink-0 text-meta text-fg-secondary">保存到</span>
                 <PathText
                   path={saveDir || '未选择下载目录'}
                   copyable={false}
-                  className="max-w-[420px]"
+                  className="max-w-[280px]"
                   onCopied={(text) => pushToast('success', '路径已复制', text)}
                 />
                 <Button

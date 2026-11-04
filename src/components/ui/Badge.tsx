@@ -10,6 +10,7 @@ import {
   TASK_STATUS_STYLE,
 } from '../../lib/labels'
 import { cx } from '../../lib/cx'
+import { AlertCircle, CheckCircle2, CircleArrowDown, CirclePause, CircleX, Clock, type LucideIcon } from '../icons'
 
 export type BadgeTone =
   | 'slate'
@@ -75,19 +76,23 @@ export function FileKindBadge({ kind }: { kind: FileKind }) {
   )
 }
 
-/** 下载任务状态徽章，active 时呼吸点。 */
+const STATUS_ICON: Record<TaskStatus, LucideIcon> = {
+  queued: Clock,
+  active: CircleArrowDown,
+  pausing: Clock,
+  paused: CirclePause,
+  completed: CheckCircle2,
+  error: AlertCircle,
+  cancelled: CircleX,
+}
+
+/** 状态同时由文字、图形和语义色表达。 */
 export function StatusBadge({ status }: { status: TaskStatus }) {
   const style = TASK_STATUS_STYLE[status]
+  const Icon = STATUS_ICON[status]
   return (
     <span className={cx(BADGE_BASE, 'shrink-0 px-2', style.badge)}>
-      <span
-        className={cx(
-          'h-1.5 w-1.5 rounded-full',
-          style.dot,
-          status === 'active' && 'animate-pulse',
-        )}
-        aria-hidden="true"
-      />
+      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
       {TASK_STATUS_LABEL[status]}
     </span>
   )

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Compass, RefreshCw, Search, X } from 'lucide-react'
+import { ChevronDown, Compass, RefreshCw, Search, X } from '../components/icons'
 import type { RepoSearchPage, RepoSummary, Source } from '../types'
 import { searchRepos, toErrorText } from '../lib/ipc'
 import { RepoCard } from '../components/browse/RepoCard'
@@ -215,11 +215,12 @@ export default function BrowsePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="page-container space-y-3 pb-8">
+      <div className="page-container space-y-7 pb-8">
         {/* 搜索区 */}
-        <section className="rounded-card border border-line bg-surface p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <section aria-label="查找模型" className="space-y-4">
+          <div className="flex flex-col gap-4">
             <SegmentedControl
+              variant="tabs"
               ariaLabel="切换模型来源"
               value={source}
               onChange={(value) => {
@@ -232,7 +233,7 @@ export default function BrowsePage() {
             <form onSubmit={handleSubmit} className="flex min-w-0 flex-1 items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-muted"
+                  className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-fg-muted"
                   aria-hidden="true"
                 />
                 <input
@@ -245,7 +246,7 @@ export default function BrowsePage() {
                       ? '搜索 HuggingFace 仓库，例如 Qwen/Qwen2.5-7B-Instruct'
                       : '搜索 ModelScope 仓库，例如 Qwen/Qwen2.5-7B-Instruct'
                   }
-                  className="h-control w-full rounded-control border border-line-strong bg-surface pl-9 pr-9 text-body text-fg transition-colors duration-micro placeholder:text-fg-muted focus-visible:border-primary"
+                  className="h-12 w-full rounded-control border border-line-strong bg-surface pl-11 pr-9 text-body text-fg transition-colors duration-micro placeholder:text-fg-muted focus-visible:border-primary"
                 />
                 {query ? (
                   <button
@@ -261,7 +262,7 @@ export default function BrowsePage() {
               <Button
                 type="submit"
                 variant="primary"
-                size="lg"
+                size="xl"
                 loading={initialLoading}
                 leftIcon={<Search className="h-4 w-4" />}
               >
@@ -270,7 +271,7 @@ export default function BrowsePage() {
             </form>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3 text-meta text-fg-secondary">
+          <div className="flex flex-wrap items-center gap-1.5 text-meta text-fg-secondary">
             <span className="mr-1 text-fg-muted">热门搜索</span>
             {SUGGESTIONS.map((suggestion) => (
               <button
@@ -280,13 +281,13 @@ export default function BrowsePage() {
                   setQuery(suggestion.query)
                   resetAndSearch(suggestion.query)
                 }}
-                className="h-7 cursor-pointer rounded-control border border-line bg-surface-2 px-2 text-meta text-fg-secondary transition-colors duration-micro hover:border-primary/30 hover:bg-primary-soft hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                className="h-7 cursor-pointer rounded-md px-2 text-meta text-fg-secondary transition-colors duration-micro hover:bg-primary-soft hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
               >
                 {suggestion.label}
               </button>
             ))}
             <span className="ml-auto hidden items-center gap-1 text-meta text-fg-muted sm:flex">
-              数据来源：{SOURCE_LABEL[source]} · Ctrl+F 聚焦搜索
+              Ctrl+F 搜索
             </span>
           </div>
         </section>
@@ -322,7 +323,7 @@ export default function BrowsePage() {
             retryLabel="重新搜索"
           />
         ) : initialLoading ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+          <div className="divide-y divide-line" aria-busy="true">
             {Array.from({ length: 6 }).map((_, index) => (
               <RepoCardSkeleton key={index} />
             ))}
@@ -356,7 +357,10 @@ export default function BrowsePage() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div>
+              <div className="repo-columns border-b border-line px-3 pb-3 text-meta text-fg-muted" aria-hidden="true">
+                <span>模型仓库</span><span className="hidden lg:block">任务类型</span><span className="hidden lg:block">下载 / 点赞</span><span className="text-right">文件</span>
+              </div>
               {items.map((repo) => (
                 <RepoCard
                   key={`${repo.source}:${repo.id}`}

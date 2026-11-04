@@ -863,7 +863,7 @@ async function main() {
     results.record('测试实例启动（9223 + WebView2 数据目录隔离）', true, `spawnedPid=${state.spawnedPid}`)
     state.client = await connectApp(target)
     const snapshot = await state.client.tauriInvoke('get_snapshot')
-    results.record('真实模式 / 版本号', snapshot.appVersion === '0.2.0' && !(await state.client.evaluate('document.body.innerText.includes("Mock 数据模式")')), `appVersion=${snapshot.appVersion}`)
+    results.record('真实模式 / 版本号', snapshot.appVersion === '0.2.0' && !(await state.client.evaluate('document.body.innerText.includes("演示数据")')), `appVersion=${snapshot.appVersion}`)
 
     await runVisualAndTheme(state.client)
     await runKeyboardAndShortcuts(state.client)

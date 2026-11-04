@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen } from '../icons'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { ShortcutsHelpDialog } from './ShortcutsHelpDialog'
@@ -7,14 +7,13 @@ import { useGlobalShortcuts } from './useGlobalShortcuts'
 import { useAppStore, type PageKey } from '../../store/appStore'
 import { openDataDir } from '../../lib/ipc'
 import { formatRelativeTime } from '../../lib/format'
-import { IS_MOCK_MODE } from '../../lib/ipc'
 import { cx } from '../../lib/cx'
 import { PathText } from '../ui/PathText'
 
 export const PAGE_META: Record<PageKey, { title: string; subtitle: string }> = {
   browse: {
     title: '浏览仓库',
-    subtitle: '搜索 HuggingFace / ModelScope 模型仓库，挑选文件加入下载队列',
+    subtitle: '查找模型，选择文件，下载到你的设备。',
   },
   downloads: {
     title: '下载队列',
@@ -33,27 +32,20 @@ export const PAGE_META: Record<PageKey, { title: string; subtitle: string }> = {
 function StatusBar() {
   const settings = useAppStore((state) => state.settings)
   const dataDir = useAppStore((state) => state.dataDir)
-  const appVersion = useAppStore((state) => state.appVersion)
   const eventsStatus = useAppStore((state) => state.eventsStatus)
   const eventsError = useAppStore((state) => state.eventsError)
   const lastSnapshotAt = useAppStore((state) => state.lastSnapshotAt)
   const pushToast = useAppStore((state) => state.pushToast)
-  const completedCount = useAppStore(
-    (state) => state.tasks.filter((task) => task.status === 'completed').length,
-  )
-  const failedCount = useAppStore(
-    (state) => state.tasks.filter((task) => task.status === 'error').length,
-  )
   // v0.1.3：节流后的读屏播报（完成/失败摘要），不播报进度。
   const announcement = useAppStore((state) => state.announcement)
   const announcementSeq = useAppStore((state) => state.announcementSeq)
 
   const eventMeta =
     eventsStatus === 'ready'
-      ? { dot: 'bg-success', label: '事件通道已连接' }
+      ? { dot: 'bg-success', label: '状态已同步' }
       : eventsStatus === 'error'
-        ? { dot: 'bg-danger', label: '事件通道异常' }
-        : { dot: 'bg-warning', label: '正在连接事件通道…' }
+        ? { dot: 'bg-danger', label: '同步异常' }
+        : { dot: 'bg-warning', label: '正在连接…' }
 
   const handleOpenDataDir = async () => {
     try {
@@ -65,7 +57,7 @@ function StatusBar() {
   }
 
   return (
-    <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line bg-surface px-4 text-meta text-fg-muted">
+    <footer className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-line bg-surface px-4 text-meta text-fg-muted md:px-8">
       <div className="flex shrink-0 items-center gap-3">
         <span
           className="inline-flex items-center gap-1.5"
@@ -77,12 +69,9 @@ function StatusBar() {
           <span className={cx('h-1.5 w-1.5 rounded-full', eventMeta.dot)} aria-hidden="true" />
           {eventMeta.label}
         </span>
-        {IS_MOCK_MODE ? (
-          <span className="font-medium text-warning">Mock 模式</span>
-        ) : null}
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+      <div className="hidden min-w-0 flex-1 items-center justify-end gap-1.5 md:flex">
         <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {settings?.downloadDir ? (
           <PathText path={settings.downloadDir} copyable={false} className="max-w-xl" />
@@ -92,12 +81,6 @@ function StatusBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
-        <span className="hidden items-center gap-2 tabular-nums sm:flex">
-          <span>已完成 {completedCount}</span>
-          <span className={failedCount > 0 ? 'text-danger' : undefined}>
-            失败 {failedCount}
-          </span>
-        </span>
         <button
           type="button"
           onClick={() => void handleOpenDataDir()}
@@ -106,7 +89,6 @@ function StatusBar() {
         >
           打开数据目录
         </button>
-        <span className="tabular-nums">v{appVersion || '—'}</span>
       </div>
 
       {/* 节流完成/失败播报：每 ≥2.2s 一条聚合摘要，避免进度事件刷屏（P1-4）。 */}
@@ -145,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         跳到主要内容
       </a>
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="app-workspace my-2 mr-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-card bg-surface">
         <TopBar title={meta.title} subtitle={meta.subtitle} onShowHelp={() => setHelpOpen(true)} />
         <main
           id="main"

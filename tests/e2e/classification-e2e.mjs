@@ -672,7 +672,7 @@ async function main() {
     state.originalSettings = await state.client.tauriInvoke('get_settings')
     results.record(
       '真实模式启动 / 版本号',
-      snapshot.appVersion === '0.2.0' && !(await state.client.evaluate('document.body.innerText.includes("Mock 数据模式")')),
+      snapshot.appVersion === '0.2.0' && !(await state.client.evaluate('document.body.innerText.includes("演示数据")')),
       `appVersion=${snapshot.appVersion}（期望 0.2.0）`,
     )
 

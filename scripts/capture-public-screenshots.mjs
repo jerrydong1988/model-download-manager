@@ -4,6 +4,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { connect, sleep } from '../tests/e2e/cdp.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -15,6 +16,15 @@ const PORT = Number(process.argv[3] || 19310)
 const OUT = join(ROOT, 'docs', 'screenshots')
 const client = await connect(PORT)
 const records = []
+const galleryFiles = {
+  '01-browse': 'ui-browse.jpg',
+  '02-downloads': 'ui-downloads.jpg',
+  '03-library': 'ui-library.jpg',
+  '04-settings': 'ui-settings.jpg',
+  '05-repo-detail': 'ui-files.jpg',
+  'dark-01-browse': 'ui-dark.jpg',
+  '12-revision-selector': 'ui-revision.jpg',
+}
 let navigationIndex = 0
 try {
   await client.startCapture()
@@ -27,7 +37,7 @@ try {
   await client.send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.setInterval = () => 0;' })
   const load = async (page, extra = '', theme = 'light') => {
     await client.navigate(`${BASE.origin}/?mock=1&capture=${Date.now()}-${++navigationIndex}${extra}#/${page}`)
-    await client.waitFor("document.body.innerText.includes('Mock') && document.body.innerText.includes('v0.2.0')", { timeoutMs: 30000 })
+    await client.waitFor("document.body.innerText.includes('演示数据') && document.body.innerText.includes('v0.2.1')", { timeoutMs: 30000 })
     await client.evaluate(`(async () => {
       if (window.__TAURI_INTERNALS__) throw new Error('Native application capture is forbidden');
       const ipc = await import('/src/lib/ipc.ts');
@@ -42,9 +52,10 @@ try {
     if (/[A-Za-z]:[\\/]+Users[\\/]+/i.test(visible) || /\b(?:hf_[A-Za-z0-9]{25,}|gh[pousr]_[A-Za-z0-9]{30,})\b/.test(visible)) {
       throw new Error(`Private path or credential in ${name}`)
     }
-    if (!visible.includes('Mock')) throw new Error(`Missing demo indicator in ${name}`)
-    const info = await client.screenshot(join(OUT, `${name}.png`))
-    records.push({ file: `${name}.png`, bytes: info.bytes, mock: true })
+    if (!visible.includes('演示数据')) throw new Error(`Missing demo indicator in ${name}`)
+    const file = galleryFiles[name] || `${name}.png`
+    const info = await client.screenshot(join(OUT, file), { format: file.endsWith('.jpg') ? 'jpeg' : 'png' })
+    records.push({ file, bytes: info.bytes, mock: true, viewport: [1440, 900] })
     console.log(`captured ${name}`)
   }
   const detail = async () => {
@@ -76,6 +87,13 @@ try {
   if (client.pageErrors.length || client.consoleErrors.length) throw new Error(`Capture errors: ${JSON.stringify({page:client.pageErrors,console:client.consoleErrors})}`)
   mkdirSync(join(ROOT,'.temp'), {recursive: true})
   writeFileSync(join(ROOT,'.temp','public-screenshot-verification.json'),JSON.stringify({records,pageErrors:client.pageErrors,consoleErrors:client.consoleErrors},null,2))
+  writeFileSync(join(OUT,'ui-captures.json'),JSON.stringify({
+    capturedAt: new Date().toISOString(),
+    source: 'Model Download Manager browser preview with ?mock=1',
+    data: 'Synthetic fixtures; no personal files or credentials',
+    implementationCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
+    images: records.filter(record => record.file.startsWith('ui-')),
+  },null,2))
 } finally {
   await client.close()
 }

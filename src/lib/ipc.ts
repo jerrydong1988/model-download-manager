@@ -24,6 +24,8 @@ import type {
   SearchReposArgs,
   Settings,
   Source,
+  UpdateInfo,
+  UpdateProgressEvent,
 } from '../types'
 import { createMockBridge } from '../mocks/mockIpc'
 
@@ -188,11 +190,37 @@ export function getDiskSpace(path: string): Promise<DiskSpace> {
 }
 
 /* ------------------------------------------------------------------ */
+/* 在线升级（v0.5.0）                                                   */
+/* ------------------------------------------------------------------ */
+
+/** 检查更新；返回新版本信息（并已缓存待装）或 null（已是最新）。 */
+export function checkUpdate(): Promise<UpdateInfo | null> {
+  return invokeCmd<UpdateInfo | null>('check_update')
+}
+
+/** 下载并安装已缓存的新版本；进度经 update-progress 事件上报。 */
+export function installUpdate(): Promise<void> {
+  return invokeCmd<void>('install_update')
+}
+
+/** 重启应用（更新安装后）。走 process 插件 JS API（pickDirectory 同款动态导入模式）。 */
+export async function restartApp(): Promise<void> {
+  if (mockBridge) return
+  try {
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+  } catch (error) {
+    throw new Error(`无法重启应用：${toErrorText(error)}`)
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 事件订阅                                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * 订阅 5 个后端事件（含 v0.1.3 的 window-hidden-to-tray）；返回幂等的取消订阅函数。
+ * 订阅 8 个后端事件（含 v0.1.3 的 window-hidden-to-tray 与 v0.5.0 的 update-* 三个）；
+ * 返回幂等的取消订阅函数。
  * 注意：监听注册是异步的，调用方必须在组件卸载时同时处理“注册完成前已取消”的情况。
  */
 export async function subscribeAppEvents(handlers: AppEventHandlers): Promise<() => void> {
@@ -221,6 +249,13 @@ export async function subscribeAppEvents(handlers: AppEventHandlers): Promise<()
       await listen<Record<string, never>>('window-hidden-to-tray', (event) =>
         handlers.onWindowHiddenToTray(event.payload as Record<string, never>),
       ),
+      await listen<UpdateInfo>('update-available', (event) =>
+        handlers.onUpdateAvailable(event.payload),
+      ),
+      await listen<UpdateProgressEvent>('update-progress', (event) =>
+        handlers.onUpdateProgress(event.payload),
+      ),
+      await listen<Record<string, never>>('update-installed', () => handlers.onUpdateInstalled()),
     )
   } catch (error) {
     unlisteners.forEach((unlisten) => {

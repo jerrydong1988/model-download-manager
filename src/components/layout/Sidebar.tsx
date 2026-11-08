@@ -3,6 +3,7 @@ import type { LucideIcon } from '../icons'
 import { useAppStore, type PageKey } from '../../store/appStore'
 import { formatSpeed } from '../../lib/format'
 import { isRunningStatus } from '../../lib/labels'
+import { hasVisibleUpdate } from '../../lib/updateFlow'
 import { cx } from '../../lib/cx'
 
 const NAV: Array<{ page: PageKey; label: string; icon: LucideIcon }> = [
@@ -17,6 +18,7 @@ export function Sidebar() {
   const setPage = useAppStore((state) => state.setPage)
   const tasks = useAppStore((state) => state.tasks)
   const appVersion = useAppStore((state) => state.appVersion)
+  const updateStatus = useAppStore((state) => state.update.status)
   const running = tasks.filter((task) => isRunningStatus(task.status))
   const totalSpeed = running.reduce((sum, task) => sum + task.speed, 0)
 
@@ -59,7 +61,19 @@ export function Sidebar() {
             <span className="mt-1 block text-body font-medium tabular-nums">{totalSpeed > 0 ? formatSpeed(totalSpeed) : '正在连接…'}</span>
           </button>
         ) : null}
-        <p className="text-meta text-fg-muted">v{appVersion || '—'} · 桌面版</p>
+        <p className="text-meta text-fg-muted">
+          v{appVersion || '—'} · 桌面版
+          {hasVisibleUpdate(updateStatus) ? (
+            <button
+              type="button"
+              onClick={() => setPage('settings')}
+              className="ml-1.5 inline-flex cursor-pointer items-center gap-1 align-baseline text-warning hover:underline"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden="true" />
+              有新版本
+            </button>
+          ) : null}
+        </p>
       </div>
     </aside>
   )

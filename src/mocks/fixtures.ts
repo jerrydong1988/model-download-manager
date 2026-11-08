@@ -17,6 +17,10 @@ import { defaultRevisionFor } from '../lib/format'
 export const MOCK_APP_VERSION = '0.4.2'
 export const MOCK_DATA_DIR = 'C:\\DemoAppData\\com.modeldownload.manager'
 export const MOCK_DEFAULT_DOWNLOAD_DIR = 'C:\\Models'
+/** v0.5.0：在线升级验收（?mock=1&update=1 时模拟发现新版本）。 */
+export const MOCK_UPDATE_VERSION = '0.5.0'
+export const MOCK_UPDATE_NOTES =
+  'v0.5.0 更新内容：\n· 应用内在线升级（设置页一键下载安装）\n· 启动自动检查新版本（可在设置中关闭）'
 /** v0.2.0：多扫描根验收用的附加根目录（仅 ?mock=1&multiroot=1 时写入 settings.libraryRoots）。 */
 export const MOCK_LIBRARY_ROOT_2 = 'D:\\AI\\Models-Roots\\Research'
 export const MOCK_LIBRARY_ROOT_3 = 'E:\\LLM-Cache'
@@ -44,6 +48,9 @@ export function createMockSettings(): Settings {
     // v0.2.0：单文件 4 连接；默认只扫描 downloadDir（附加根为空）。
     connectionsPerFile: 4,
     libraryRoots: [],
+    // v0.5.0：默认自动检查更新；更新源留空 = 内置 GitHub 源。
+    autoCheckUpdates: true,
+    updateEndpoint: '',
   }
 }
 

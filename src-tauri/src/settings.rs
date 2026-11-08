@@ -48,6 +48,8 @@ impl Default for Settings {
             notifications_enabled: true,
             connections_per_file: 4,
             library_roots: Vec::new(),
+            auto_check_updates: true,
+            update_endpoint: String::new(),
         }
     }
 }
@@ -108,6 +110,7 @@ pub fn validate_and_clamp(mut settings: Settings) -> Result<Settings, String> {
     settings.theme = normalize_theme(&settings.theme);
     settings.hf_endpoint = normalize_endpoint(&settings.hf_endpoint, "HuggingFace")?;
     settings.ms_endpoint = normalize_endpoint(&settings.ms_endpoint, "ModelScope")?;
+    settings.update_endpoint = normalize_update_endpoint(&settings.update_endpoint)?;
     if !settings.proxy.is_empty() {
         validate_proxy(&settings.proxy)?;
     }
@@ -143,6 +146,8 @@ pub fn sanitize(mut settings: Settings) -> Result<Settings, String> {
         .unwrap_or_else(|_| DEFAULT_HF_ENDPOINT.to_string());
     settings.ms_endpoint = normalize_endpoint(&settings.ms_endpoint, "ModelScope")
         .unwrap_or_else(|_| DEFAULT_MS_ENDPOINT.to_string());
+    settings.update_endpoint = normalize_update_endpoint(&settings.update_endpoint)
+        .unwrap_or_default();
     let dir = settings.download_dir.trim().to_string();
     settings.download_dir = if dir.is_empty() || !is_absolute_dir(&dir) {
         default_download_dir()
@@ -197,6 +202,15 @@ pub fn normalize_library_roots(raw: &[String], download_dir: &str) -> Vec<String
 pub fn save(data_dir: &Path, settings: &Settings) -> Result<(), String> {
     let path = settings_path(data_dir);
     util::atomic_write_json(&path, settings)
+}
+
+/// v0.5.0：更新源覆盖端点规范化：空串合法（表示使用内置端点）；否则按 URL 校验。
+pub fn normalize_update_endpoint(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    normalize_endpoint(trimmed, "更新源")
 }
 
 /// 端点规范化：去空格、去尾部 `/`、必须 http(s) 且 host 非空。
@@ -376,6 +390,44 @@ mod tests {
         // 超过 8 个时截断。
         let many: Vec<String> = (0..12).map(|index| format!("D:\\root-{index}")).collect();
         assert_eq!(normalize_library_roots(&many, download).len(), 8);
+    }
+
+    #[test]
+    fn legacy_settings_json_defaults_new_v050_fields() {
+        // v0.4.2 及更早的 settings.json 不含 autoCheckUpdates/updateEndpoint。
+        let legacy = r#"{"downloadDir":"C:\\Models","concurrency":5}"#;
+        let settings: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(
+            settings.auto_check_updates,
+            "缺失 autoCheckUpdates 用默认 true"
+        );
+        assert!(
+            settings.update_endpoint.is_empty(),
+            "缺失 updateEndpoint 用默认空（内置端点）"
+        );
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(json["autoCheckUpdates"], true);
+        assert_eq!(json["updateEndpoint"], "");
+    }
+
+    #[test]
+    fn normalizes_update_endpoint() {
+        assert_eq!(normalize_update_endpoint("").unwrap(), "");
+        assert_eq!(normalize_update_endpoint("   ").unwrap(), "");
+        assert_eq!(
+            normalize_update_endpoint(" https://mirror.example.com/latest.json ").unwrap(),
+            "https://mirror.example.com/latest.json"
+        );
+        assert!(normalize_update_endpoint("ftp://x").is_err());
+        assert!(normalize_update_endpoint("not a url").is_err());
+
+        // 非法更新源：validate 报错，sanitize 静默回退空。
+        let mut s = Settings::default();
+        s.download_dir = default_download_dir();
+        s.update_endpoint = "ftp://bad".to_string();
+        assert!(validate_and_clamp(s.clone()).is_err());
+        let cleaned = sanitize(s).unwrap();
+        assert_eq!(cleaned.update_endpoint, "");
     }
 
     #[test]

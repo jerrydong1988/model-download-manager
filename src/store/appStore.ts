@@ -12,11 +12,25 @@ import type {
   DownloadTask,
   Settings,
   TaskStatus,
+  UpdateInfo,
+  UpdateProgressEvent,
 } from '../types'
 import * as ipc from '../lib/ipc'
 import { toErrorText } from '../lib/ipc'
 import { defaultRevisionFor, formatBytes } from '../lib/format'
 import { getPendingTheme } from '../lib/themeIntent'
+import {
+  INITIAL_UPDATE_SLICE,
+  autoUpdateToastDescription,
+  shouldApplyAvailableEvent,
+  shouldApplyProgressEvent,
+  statusAfterCheck,
+  statusCheckFailed,
+  statusChecking,
+  statusDownloading,
+  statusInstalled,
+  type UpdateSlice,
+} from '../lib/updateFlow'
 
 export type PageKey = 'browse' | 'downloads' | 'library' | 'settings'
 export type ToastKind = 'success' | 'error' | 'info'
@@ -50,6 +64,8 @@ interface AppState {
   eventsStatus: EventsStatus
   eventsError: string | null
   toasts: ToastItem[]
+  /** v0.5.0：在线升级状态切片（见 src/lib/updateFlow.ts）。 */
+  update: UpdateSlice
   /** v0.1.3：状态栏节流播报（aria-live polite），如「已完成 2 个任务」。 */
   announcement: string
   /** 递增序号：即使文案相同也强制读屏重新播报。 */
@@ -65,6 +81,16 @@ interface AppState {
   upsertTasks: (tasks: DownloadTask[]) => void
   removeTasks: (taskIds: string[]) => void
   setSettings: (settings: Settings) => void
+  /** v0.5.0：检查应用更新；manual=true 为设置页手动触发（无新版显示 upToDate），false 为启动自动检查（静默）。 */
+  checkForUpdates: (manual: boolean) => Promise<void>
+  /** v0.5.0：下载安装已缓存的新版本；完成后自动重启。 */
+  installUpdate: () => Promise<void>
+  /** v0.5.0：update-available 事件（自动检查）应用。 */
+  handleUpdateAvailable: (info: UpdateInfo) => void
+  /** v0.5.0：update-progress 事件应用（仅 downloading 期间）。 */
+  applyUpdateProgress: (payload: UpdateProgressEvent) => void
+  /** v0.5.0：update-installed 事件：标记完成并触发重启。 */
+  handleUpdateInstalled: () => void
   pushToast: (
     kind: ToastKind,
     title: string,
@@ -120,6 +146,9 @@ function withSettingsDefaults(settings: Settings): Settings {
     connectionsPerFile:
       typeof settings.connectionsPerFile === 'number' ? settings.connectionsPerFile : 4,
     libraryRoots: Array.isArray(settings.libraryRoots) ? settings.libraryRoots : [],
+    // v0.5.0：旧 settings.json 缺更新相关字段时补契约默认值。
+    autoCheckUpdates: settings.autoCheckUpdates ?? true,
+    updateEndpoint: typeof settings.updateEndpoint === 'string' ? settings.updateEndpoint : '',
   }
 }
 
@@ -329,6 +358,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   eventsStatus: 'idle',
   eventsError: null,
   toasts: [],
+  update: INITIAL_UPDATE_SLICE,
   announcement: '',
   announcementSeq: 0,
 
@@ -388,6 +418,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             '已最小化到托盘',
             '下载将在后台继续；双击托盘图标可恢复窗口。',
           ),
+        onUpdateAvailable: (info) => get().handleUpdateAvailable(info),
+        onUpdateProgress: (payload) => get().applyUpdateProgress(payload),
+        onUpdateInstalled: () => get().handleUpdateInstalled(),
       })
       .then((unlisten) => {
         if (session.disposed) {
@@ -457,6 +490,60 @@ export const useAppStore = create<AppState>((set, get) => ({
       pending && settings.theme !== pending ? { ...settings, theme: pending } : settings
     if (snapshotJournal) snapshotSettings = next
     set({ settings: withSettingsDefaults(next) })
+  },
+
+  /* ---------------- v0.5.0 在线升级 ---------------- */
+
+  checkForUpdates: async (manual) => {
+    set({ update: statusChecking() })
+    try {
+      const info = await ipc.checkUpdate()
+      set({ update: statusAfterCheck(manual, info) })
+    } catch (error) {
+      const message = toErrorText(error)
+      set({ update: statusCheckFailed(message) })
+      if (manual) get().pushToast('error', '检查更新失败', message)
+    }
+  },
+
+  installUpdate: async () => {
+    set({ update: statusDownloading() })
+    try {
+      await ipc.installUpdate()
+    } catch (error) {
+      const message = toErrorText(error)
+      set({ update: statusCheckFailed(message) })
+      get().pushToast('error', '安装更新失败', message)
+      return
+    }
+    // Windows 安装程序可能已接管退出；若进程仍在（静默失败等）主动重启。
+    set({ update: statusInstalled(get().update.info) })
+    get().pushToast('success', '更新已安装', '应用即将重启以完成升级。')
+    void ipc.restartApp().catch((error: unknown) => {
+      get().pushToast('error', '无法自动重启', toErrorText(error))
+    })
+  },
+
+  handleUpdateAvailable: (info) => {
+    if (!shouldApplyAvailableEvent(get().update.status)) return
+    set({ update: statusAfterCheck(false, info) })
+    get().pushToast('info', `发现新版本 v${info.version}`, autoUpdateToastDescription(info), {
+      label: '查看更新',
+      onClick: () => get().setPage('settings'),
+    })
+  },
+
+  applyUpdateProgress: (payload) => {
+    if (!shouldApplyProgressEvent(get().update.status)) return
+    set((state) => ({ update: { ...state.update, progress: payload } }))
+  },
+
+  handleUpdateInstalled: () => {
+    if (get().update.status === 'installed') return
+    set({ update: statusInstalled(get().update.info) })
+    void ipc.restartApp().catch((error: unknown) => {
+      get().pushToast('error', '无法自动重启', toErrorText(error))
+    })
   },
 
   pushToast: (kind, title, description, action) => {

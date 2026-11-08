@@ -235,6 +235,17 @@ interface AppSnapshot {
 | 20 | `open_data_dir` | — | `()` | 打开应用数据目录 |
 | 21 | `list_revisions` | `{ source, repoId }` | `RevisionList` | v0.2.0：仓库可下载 revision 列表（HF refs；ModelScope 尽力） |
 | 22 | `disk_space` | `{ path }` | `DiskSpace` | 读取 `path` 所在卷的可用空间。目录不存在时向父级回退。`DiskSpace = { freeBytes, totalBytes, volume }` |
+| 23 | `check_update` | — | `UpdateInfo \| null` | v0.5.0：检查更新（有缓存待装时覆盖）。`null` = 已是最新；设置 `updateEndpoint` 非空时覆盖内置端点。检查到新版同时缓存，供 `install_update` 使用 |
+| 24 | `install_update` | — | `()` | v0.5.0：下载并安装已缓存的新版本；进度经 `update-progress` 事件上报，完成后发 `update-installed`。重启由前端 process 插件 `relaunch()` 完成（capabilities 已含 `process:allow-restart`）。Windows 安装程序可能直接接管退出旧进程，此时命令响应可能丢失，属正常 |
+
+### UpdateInfo（v0.5.0）
+
+```ts
+interface UpdateInfo {
+  version: string              // 新版本号（semver 大于当前版本才会返回）
+  notes?: string | null        // 更新说明（release notes 正文）
+}
+```
 
 ### RevisionList
 
@@ -263,6 +274,9 @@ interface RevisionList {
 | `tasks-removed` | `{ taskIds: string[] }` | `remove_tasks`/`clear_finished` 后 |
 | `settings-updated` | `{ settings: Settings }` | `save_settings` 后（含钳制结果） |
 | `window-hidden-to-tray` | `{}` | v0.1.3：关闭窗口但继续后台下载（隐藏到托盘）时触发；前端弹提示「已最小化到托盘，下载继续」 |
+| `update-available` | `UpdateInfo` | v0.5.0：启动自动检查（autoCheckUpdates，延迟 ~4s）发现新版；前端弹 toast「发现新版本」（手动检查走命令返回值不发事件） |
+| `update-progress` | `{ downloaded, total: number \| null }` | v0.5.0：更新包下载进度，节流 ~200ms；`total` 在响应头到达前为 `null` |
+| `update-installed` | `{}` | v0.5.0：更新下载安装完成，应用即将重启（前端兜底调用 process `relaunch()`） |
 
 前端 reducers 必须幂等：同一 task 事件重复到达不应产生重复条目。
 

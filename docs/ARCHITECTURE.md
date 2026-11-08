@@ -73,6 +73,9 @@ download.rs        —— 纯传输引擎：
                        pub async fn transfer(ctx: TransferContext, sink: &dyn EventSink) -> Result<TransferOutcome, DownloadError>
                        使用 EventSink trait 发事件（AppHandle 实现 + 测试用 RecordingSink）
 util.rs / settings.rs / models.rs —— 无状态工具与类型
+updater.rs（v0.5.0，与 commands/desktop 同为 cfg(not(test)) 桌面层）—— 在线升级薄封装：
+                       check_update / install_update 命令与启动自动检查（spawn_auto_check），
+                       基于 tauri-plugin-updater；重启走前端 process 插件 relaunch()
 ```
 
 硬性要求：

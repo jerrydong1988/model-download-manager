@@ -1,6 +1,6 @@
 /**
  * 浏览器 mock 桥：仅用于 ?mock=1 / VITE_MOCK=1 视觉与交互验证。
- * 模拟 IPC 延迟、21 个命令、5 个事件与非确定性进度推送；不参与 Tauri 生产构建路径。
+ * 模拟 IPC 延迟、24 个命令、8 个事件与非确定性进度推送；不参与 Tauri 生产构建路径。
  */
 
 import type {
@@ -22,6 +22,7 @@ import type {
   StartDownloadsArgs,
   TaskIdArgs,
   TestConnectionArgs,
+  UpdateInfo,
 } from '../types'
 import { defaultRevisionFor } from '../lib/format'
 import {
@@ -43,6 +44,8 @@ import {
   MOCK_LIBRARY_ROOT_3,
   MOCK_MS_ENDPOINT,
   MOCK_REPOS,
+  MOCK_UPDATE_NOTES,
+  MOCK_UPDATE_VERSION,
 } from './fixtures'
 
 const MB = 1024 * 1024
@@ -134,6 +137,9 @@ function normalizeSettings(input: Settings): Settings {
     notificationsEnabled: Boolean(input.notificationsEnabled),
     connectionsPerFile,
     libraryRoots,
+    autoCheckUpdates: input.autoCheckUpdates ?? true,
+    updateEndpoint:
+      typeof input.updateEndpoint === 'string' ? input.updateEndpoint.trim() : '',
   }
 }
 
@@ -156,6 +162,14 @@ export function createMockBridge(): MockBridge {
   // ?mock=1&legacy=1 模拟旧版后端/旧数据：snapshot 任务缺 revision、settings 缺 v0.2 字段、
   // 库文件缺 rootDir（验证前端默认值与兼容显示，不崩溃）。
   const legacyFixture = params.get('legacy') === '1'
+  // ?mock=1&update=1 v0.5.0 在线升级验收：模拟发现新版本（订阅后 ~4.5s 自动推送，
+  // 同后端启动自动检查节奏；也可手动触发 mock:update-available）。
+  const updateFixture = params.get('update') === '1'
+
+  const mockUpdateInfo = (): UpdateInfo => ({
+    version: MOCK_UPDATE_VERSION,
+    notes: MOCK_UPDATE_NOTES,
+  })
 
   let settings: Settings = createMockSettings()
   if (multiRootFixture) {
@@ -354,6 +368,9 @@ export function createMockBridge(): MockBridge {
           const legacySettings = { ...snapshot.settings } as Partial<Settings>
           delete legacySettings.connectionsPerFile
           delete legacySettings.libraryRoots
+          // v0.5.0 兼容：旧 settings.json 也缺更新字段。
+          delete legacySettings.autoCheckUpdates
+          delete legacySettings.updateEndpoint
           snapshot.settings = legacySettings as Settings
         }
         return result(snapshot)
@@ -645,6 +662,31 @@ export function createMockBridge(): MockBridge {
         })
       }
 
+      case 'check_update': {
+        if (updateFixture) return result(mockUpdateInfo())
+        return result(null)
+      }
+
+      case 'install_update': {
+        // 模拟 ~48MB 更新包下载：300ms tick 推进度，完成后发 update-installed。
+        const total = 48 * MB
+        let downloaded = 0
+        await new Promise<void>((resolve) => {
+          const stepper = window.setInterval(() => {
+            downloaded = Math.min(total, downloaded + total * (0.12 + Math.random() * 0.12))
+            handlers?.onUpdateProgress({ downloaded: Math.round(downloaded), total })
+            if (downloaded >= total) {
+              window.clearInterval(stepper)
+              window.setTimeout(() => {
+                handlers?.onUpdateInstalled()
+                resolve()
+              }, 250)
+            }
+          }, 300)
+        })
+        return result(undefined)
+      }
+
       default:
         throw new Error(`mock 模式未实现的命令：${command}`)
     }
@@ -663,8 +705,22 @@ export function createMockBridge(): MockBridge {
       handlers?.onWindowHiddenToTray({})
     }
     window.addEventListener('mock:window-hidden-to-tray', trayListener)
+    // v0.5.0：?mock=1&update=1 模拟启动自动检查（~4.5s 推送，同后端延迟）；
+    // 验收脚本也可手动触发：window.dispatchEvent(new CustomEvent('mock:update-available'))
+    let updateTimer: number | null = null
+    if (updateFixture) {
+      updateTimer = window.setTimeout(() => {
+        handlers?.onUpdateAvailable(mockUpdateInfo())
+      }, 4500)
+    }
+    const updateListener = () => {
+      handlers?.onUpdateAvailable(mockUpdateInfo())
+    }
+    window.addEventListener('mock:update-available', updateListener)
     return () => {
       window.removeEventListener('mock:window-hidden-to-tray', trayListener)
+      window.removeEventListener('mock:update-available', updateListener)
+      if (updateTimer != null) window.clearTimeout(updateTimer)
       if (handlers === next) {
         handlers = null
         stopTimer()

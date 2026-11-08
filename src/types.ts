@@ -55,6 +55,10 @@ export interface Settings {
   connectionsPerFile: number
   /** v0.2.0 新增：本地库附加扫描根目录（绝对路径数组）；空 = 仅扫描 downloadDir */
   libraryRoots: string[]
+  /** v0.5.0 新增：启动时自动检查应用更新，默认 true */
+  autoCheckUpdates: boolean
+  /** v0.5.0 新增：更新源覆盖端点（latest.json 完整 URL）；空 = 内置 GitHub Releases */
+  updateEndpoint: string
 }
 
 /** 仓库搜索结果条目（命令 2） */
@@ -304,6 +308,18 @@ export interface SettingsUpdatedEvent {
  */
 export type WindowHiddenToTrayEvent = Record<string, never>
 
+/** v0.5.0 在线升级：检查到的新版本（check_update 返回值 / update-available 事件 payload） */
+export interface UpdateInfo {
+  version: string
+  notes?: string | null
+}
+
+/** update-progress 事件；total 在响应头到达前可能为 null（未知总大小） */
+export interface UpdateProgressEvent {
+  downloaded: number
+  total: number | null
+}
+
 /** 已挂载应用事件订阅集合 */
 export interface AppEventHandlers {
   onProgress: (payload: DownloadProgressEvent) => void
@@ -312,4 +328,10 @@ export interface AppEventHandlers {
   onSettingsUpdated: (settings: Settings) => void
   /** v0.1.3：窗口隐藏到托盘（后台继续下载） */
   onWindowHiddenToTray: (payload: WindowHiddenToTrayEvent) => void
+  /** v0.5.0：启动自动检查发现新版本（手动检查走命令返回值，不发此事件） */
+  onUpdateAvailable: (info: UpdateInfo) => void
+  /** v0.5.0：更新包下载进度 */
+  onUpdateProgress: (payload: UpdateProgressEvent) => void
+  /** v0.5.0：更新包安装完成，应用即将重启 */
+  onUpdateInstalled: () => void
 }

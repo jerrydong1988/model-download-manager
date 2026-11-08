@@ -30,6 +30,7 @@ docs/ui-draft/
 
 # Local tool state
 .mimosa/
+.zcode/
 
 # Local credentials and application runtime data
 .env

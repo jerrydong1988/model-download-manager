@@ -102,10 +102,7 @@ struct VerifyJob {
     task_id: String,
     save_path: String,
     expected: String,
-    #[cfg_attr(test, allow(dead_code))]
     notify_success: bool,
-    #[cfg(not(test))]
-    app: Option<tauri::AppHandle>,
 }
 
 /// 改名之后比对 sha256。不一致则把任务改为失败，并删除损坏文件，避免按大小被当成已完成。
@@ -165,24 +162,7 @@ fn schedule_content_verify(job: VerifyJob) {
         let Some(task) = apply_verify_outcome(&job.state, &job.task_id, &job.save_path, outcome) else {
             return;
         };
-        #[cfg(not(test))]
-        if let Some(app) = &job.app {
-            use tauri::Emitter;
-            if let Ok(value) = serde_json::to_value(&task) {
-                let _ = app.emit("task-updated", serde_json::json!({ "task": value }));
-            }
-            if job.state.current_settings().notifications_enabled {
-                if task.status == TaskStatus::Error {
-                    if let Some(error) = task.error.as_deref() {
-                        crate::notifications::notify_failed(app, &task, error);
-                    }
-                } else if job.notify_success && task.verify_status == VerifyStatus::Verified {
-                    crate::notifications::notify_completed(app, &task);
-                }
-            }
-        }
-        #[cfg(test)]
-        let _ = task;
+        job.state.report_verify(&task, job.notify_success);
     };
     #[cfg(test)]
     work();
@@ -472,8 +452,6 @@ fn finish_task(
                         save_path: current.save_path.clone(),
                         expected: expected_sha,
                         notify_success: true,
-                        #[cfg(not(test))]
-                        app: sink.app_handle().cloned(),
                     });
                 }
             }
@@ -605,8 +583,6 @@ pub fn start_downloads(
                     save_path: task.save_path.clone(),
                     expected,
                     notify_success: false,
-                    #[cfg(not(test))]
-                    app: sink.app_handle().cloned(),
                 });
             }
         }

@@ -13,6 +13,9 @@ use tokio::sync::Notify;
 use crate::models::{DownloadTask, Settings, Source, TaskStatus};
 use crate::util::{self, BandwidthLimiter};
 
+/// 校验结束后的界面回调。由桌面层注册；下载引擎本身不依赖托盘或通知插件。
+pub type VerifyReport = Arc<dyn Fn(&DownloadTask, bool) + Send + Sync>;
+
 fn next_task_sequence() -> u64 {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     SEQUENCE.fetch_add(1, Ordering::SeqCst) + 1
@@ -115,6 +118,8 @@ pub struct AppState {
     dirty: AtomicBool,
     /// 是否有终态变更需要立即落盘。
     terminal_dirty: AtomicBool,
+    /// 校验完成后再通知界面。测试不注册，因此不会链上托盘代码。
+    verify_report: Mutex<Option<VerifyReport>>,
 }
 
 impl AppState {
@@ -138,6 +143,26 @@ impl AppState {
             scheduler: Notify::new(),
             dirty: AtomicBool::new(false),
             terminal_dirty: AtomicBool::new(false),
+            verify_report: Mutex::new(None),
+        }
+    }
+
+    /// 桌面层注册校验完成回调。后注册的覆盖先前的。
+    pub fn set_verify_report(&self, report: VerifyReport) {
+        *self
+            .verify_report
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+    }
+
+    /// 把校验后的任务交给已注册回调。没有回调时只保留任务状态。
+    pub fn report_verify(&self, task: &DownloadTask, notify_success: bool) {
+        let guard = self
+            .verify_report
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(report) = guard.as_ref() {
+            report(task, notify_success);
         }
     }
 

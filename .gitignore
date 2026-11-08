@@ -26,6 +26,10 @@ Thumbs.db
 .temp/
 test-results/
 playwright-report/
+docs/ui-draft/
+
+# Local tool state
+.mimosa/
 
 # Local credentials and application runtime data
 .env

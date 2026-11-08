@@ -81,16 +81,30 @@ fn notify_terminal(
     task: &DownloadTask,
     error: Option<&str>,
 ) {
+    let outcome = match error {
+        Some(message) => crate::batch_notice::BatchOutcome::Failure(message.to_string()),
+        None => crate::batch_notice::BatchOutcome::Success,
+    };
+    publish_batch(state, sink, task, outcome);
+}
+
+#[cfg(not(test))]
+fn publish_batch(
+    state: &Arc<AppState>,
+    sink: &dyn EventSink,
+    task: &DownloadTask,
+    outcome: crate::batch_notice::BatchOutcome,
+) {
+    let Some(body) = state.take_batch_notice(task, outcome) else {
+        return;
+    };
     if !state.current_settings().notifications_enabled {
         return;
     }
     let Some(app) = sink.app_handle() else {
         return;
     };
-    match error {
-        Some(error) => crate::notifications::notify_failed(app, task, error),
-        None => crate::notifications::notify_completed(app, task),
-    }
+    crate::notifications::notify_body(app, &body);
 }
 
 fn normalized_sha(raw: Option<&str>) -> Option<String> {
@@ -498,6 +512,13 @@ fn finish_task(
             }
             if let TransitionOutcome::Updated(task) = updated {
                 util::emit_task_updated(sink, &task);
+                #[cfg(not(test))]
+                publish_batch(
+                    state,
+                    sink,
+                    &task,
+                    crate::batch_notice::BatchOutcome::Observe,
+                );
             }
             state.remove_control(task_id);
             state.mark_dirty(true);
@@ -891,6 +912,13 @@ pub fn cancel_task(
                     }
                     state.remove_control(task_id);
                     util::emit_task_updated(sink, &updated);
+                    #[cfg(not(test))]
+                    publish_batch(
+                        state,
+                        sink,
+                        &updated,
+                        crate::batch_notice::BatchOutcome::Observe,
+                    );
                     state.mark_dirty(true);
                     Ok(())
                 }

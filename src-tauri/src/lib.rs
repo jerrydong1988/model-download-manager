@@ -4,6 +4,7 @@
 //! 且仅在非单元测试构建中编译：test harness 没有 tauri-build 生成的 Windows manifest，
 //! 链接 tray/menu 代码会导入 comctl32 v6 专有导出导致 loader 失败（STATUS_ENTRYPOINT_NOT_FOUND）。
 
+pub mod batch_notice;
 pub mod download;
 pub mod integrity;
 pub mod library;

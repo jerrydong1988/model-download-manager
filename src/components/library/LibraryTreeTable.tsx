@@ -8,6 +8,7 @@ import {
   Folder,
   FolderOpen,
   FolderSearch,
+  GitBranch,
   Grid3x3,
   Projector,
   Trash2,
@@ -20,6 +21,7 @@ import type {
   LibraryTreeRow,
 } from '../../lib/libraryTree'
 import { formatBytes, formatDateTime, formatRelativeTime } from '../../lib/format'
+import { normalizeSlashes } from '../../lib/libraryTree'
 import { Badge, FileKindBadge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { PathText } from '../ui/PathText'
@@ -60,6 +62,10 @@ export interface LibraryTreeTableProps {
   onDeleteFile: (file: LibraryFileEntry) => void
   /** 变化时回到列表顶部（搜索 / 类型筛选切换） */
   resetScrollKey?: string
+  /** 出现在多个扫描根中的文件路径（小写、`/` 分隔） */
+  duplicatePaths?: Set<string>
+  /** 目录绝对路径（小写、`/` 分隔）→ 唯一 revision */
+  revisions?: Map<string, string>
 }
 
 /**
@@ -76,6 +82,8 @@ export function LibraryTreeTable({
   onRevealFile,
   onDeleteFile,
   resetScrollKey = '',
+  duplicatePaths,
+  revisions,
 }: LibraryTreeTableProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -210,6 +218,12 @@ export function LibraryTreeTable({
           >
             {dir.name}
           </span>
+          {revisions?.get(normalizeSlashes(dir.absolutePath).toLowerCase()) ? (
+            <Badge tone="violet">
+              <GitBranch className="h-3 w-3" aria-hidden="true" />
+              {revisions.get(normalizeSlashes(dir.absolutePath).toLowerCase())}
+            </Badge>
+          ) : null}
           {!row.isRoot ? (
             <span className="shrink-0 text-meta tabular-nums text-fg-muted">
               {dir.fileCount} 个
@@ -287,6 +301,9 @@ export function LibraryTreeTable({
           <FileIcon className={cx('h-4 w-4 shrink-0', visual.tone)} aria-hidden="true" />
           {/* 长文件名中间省略 + focus 完整路径 tooltip / 读屏全文（P1-5）。 */}
           <PathText path={file.path} label={file.name} copyable={false} />
+          {duplicatePaths?.has(normalizeSlashes(file.path).toLowerCase()) ? (
+            <Badge tone="amber">重复</Badge>
+          ) : null}
         </div>
         <span>
           <FileKindBadge kind={file.kind} />

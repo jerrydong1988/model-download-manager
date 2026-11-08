@@ -66,7 +66,7 @@ interface Settings {
 - 托盘交互：左键单击显示并聚焦主窗口；右键菜单：`显示主窗口` / `暂停全部` / `继续全部` / `退出`。退出前暂停全部 + 落盘。
 - 单实例：第二次启动（如快捷方式再次打开）只显示/聚焦已有窗口（`tauri-plugin-single-instance`）。
 - 窗口隐藏期间事件仍由 WebView 接收（窗口是 hide 而非 destroy），重新显示时状态即为最新；`get_snapshot` 语义不变。
-- 系统通知（`tauri-plugin-notification`，Rust 侧发送）：任务 `completed` → 「下载完成：{fileName}」；任务 `error` → 「下载失败：{fileName}」。受 `notificationsEnabled` 控制；窗口可见时同样发送（Windows 会聚合）。
+- 系统通知（`tauri-plugin-notification`，Rust 侧发送）：同一来源、仓库和 revision 的一批任务全部结束后只发一条。仅一个文件时仍是「下载完成：{fileName}」或「下载失败：{fileName}」；多个文件时为「{repoId}：成功 N，失败 M」。校验未完成前不把该文件算作结束。受 `notificationsEnabled` 控制。
 - **通知点击跳转（v0.2.0）**：注册 `NotificationExt::on_action`；用户点击通知正文（`action_id == "tap"`）时显示并聚焦主窗口（Windows 仅在 toast 仍在屏幕时上报点击，属平台限制）。托盘左键点击一直有效。
 - 托盘 tooltip 显示「模型下载管理器」；有运行中任务时显示「模型下载管理器 · N 个任务下载中」。
 
@@ -226,7 +226,8 @@ interface AppSnapshot {
 | 12 | `clear_finished` | — | `()` | 删除所有终态任务记录（不删文件） |
 | 13 | `get_settings` | — | `Settings` | |
 | 14 | `save_settings` | `{ settings: Settings }` | `Settings` | 校验/钳制后持久化并生效，返回生效值 |
-| 15 | `scan_library` | — | `LocalFile[]` | 递归扫描 `downloadDir`（深度 ≤ 8，文件数 ≤ 20000），按修改时间倒序 |
+| 15 | `scan_library` | — | `LocalFile[]` | 递归扫描 `downloadDir` 与 `libraryRoots`（深度 ≤ 8，文件数 ≤ 20000），按修改时间倒序。跳过 `.part` / `.part.json` |
+| 15b | `list_partials` | — | `LocalFile[]` | 同一批扫描根中只返回残留 `.part` 文件，供清理取消后的临时数据。不返回已完成文件 |
 | 16 | `open_path` | `{ path, reveal }` | `()` | `reveal=true` 在资源管理器中选中文件；否则打开目录/文件 |
 | 17 | `delete_local_file` | `{ path, removeTask }` | `()` | 删除文件及其 `.part`/`.part.json`；`removeTask` 同时删除对应任务记录。**实现加严**：仅允许删除 `downloadDir` 内文件，且该文件不存在未终态任务 |
 | 18 | `test_connection` | `{ source }` | `string` | 发起一次真实请求（例如查询 `Qwen/Qwen2.5-0.5B-Instruct` 的文件列表），返回中文成功信息或 `Err` |

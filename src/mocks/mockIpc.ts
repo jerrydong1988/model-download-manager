@@ -558,6 +558,20 @@ export function createMockBridge(): MockBridge {
         return result(clone(settings))
       }
 
+      case 'list_partials': {
+        if (emptyFixture || library.length === 0) return result([])
+        const sample = library[0]
+        return result([
+          {
+            ...clone(sample),
+            path: `${sample.path}.part`,
+            name: `${sample.name}.part`,
+            size: 4096,
+            kind: 'other' as const,
+          },
+        ])
+      }
+
       case 'scan_library': {
         if (emptyFixture) return result([])
         const sorted = [...library].sort((a, b) => b.modifiedAt - a.modifiedAt)

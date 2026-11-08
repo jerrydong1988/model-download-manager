@@ -25,6 +25,7 @@ import {
 } from '../lib/ipc'
 import { formatPercent, formatSpeed } from '../lib/format'
 import {
+  SOURCE_LABEL,
   TASK_STATUS_LABEL,
   TASK_STATUS_ORDER,
   TASK_STATUS_STYLE,
@@ -43,6 +44,7 @@ import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { StatCard } from '../components/ui/StatCard'
 import { TaskRowSkeleton } from '../components/ui/Skeleton'
 import { cx } from '../lib/cx'
+import { countBatch, groupTaskBatches, type TaskBatch } from '../lib/taskBatches'
 
 type FilterKey =
   | 'all'
@@ -105,7 +107,8 @@ export default function DownloadsPage() {
   const pushToast = useAppStore((state) => state.pushToast)
 
   const [filter, setFilter] = useState<FilterKey>('all')
-  const [grouped, setGrouped] = useState(false)
+  const [groupMode, setGroupMode] = useState<'flat' | 'status' | 'repo'>('repo')
+  const [batchBusy, setBatchBusy] = useState<string | null>(null)
   const [pending, setPending] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState<'pause' | 'resume' | 'clear' | null>(null)
   const [clearOpen, setClearOpen] = useState(false)
@@ -178,12 +181,17 @@ export default function DownloadsPage() {
   const hiddenCompleted = heavyList ? visibleTasks.length - renderedTasks.length : 0
 
   const groupedSections = useMemo(() => {
-    if (!grouped) return []
+    if (groupMode !== 'status') return []
     return TASK_STATUS_ORDER.map((status) => ({
       status,
       tasks: renderedTasks.filter((task) => task.status === status),
     })).filter((section) => section.tasks.length > 0)
-  }, [grouped, renderedTasks])
+  }, [groupMode, renderedTasks])
+
+  const repoBatches = useMemo(
+    () => (groupMode === 'repo' ? groupTaskBatches(renderedTasks) : []),
+    [groupMode, renderedTasks],
+  )
 
   const runTaskAction = async (
     task: DownloadTask,
@@ -252,6 +260,30 @@ export default function DownloadsPage() {
       pushToast('error', '取消下载失败', toErrorText(err))
     } finally {
       setCancelBusy(false)
+    }
+  }
+
+  const handleBatch = async (batch: TaskBatch, action: 'pause' | 'resume' | 'retry') => {
+    const targets = batch.tasks.filter((task) => {
+      if (action === 'pause') return isRunningStatus(task.status) || task.status === 'queued'
+      if (action === 'resume') return task.status === 'paused'
+      return task.status === 'error'
+    })
+    if (targets.length === 0) return
+    setBatchBusy(batch.key)
+    try {
+      for (const task of targets) {
+        if (action === 'pause') await pauseDownload(task.taskId)
+        else if (action === 'resume') await resumeDownload(task.taskId)
+        else await retryDownload(task.taskId)
+      }
+      const title =
+        action === 'pause' ? '已暂停这一批' : action === 'resume' ? '已继续这一批' : '已重试失败文件'
+      pushToast('success', title, `${batch.repoId} · ${targets.length} 个文件`)
+    } catch (err) {
+      pushToast('error', '批次操作失败', toErrorText(err))
+    } finally {
+      setBatchBusy(null)
     }
   }
 
@@ -374,15 +406,17 @@ export default function DownloadsPage() {
             size="sm"
           />
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
+            <SegmentedControl
               size="sm"
-              variant={grouped ? 'subtle' : 'ghost'}
-              aria-pressed={grouped}
-              onClick={() => setGrouped((value) => !value)}
-              leftIcon={<ListTree className="h-3.5 w-3.5" />}
-            >
-              {grouped ? '取消分组' : '按状态分组'}
-            </Button>
+              ariaLabel="任务分组方式"
+              value={groupMode}
+              onChange={setGroupMode}
+              options={[
+                { value: 'flat', label: '列表' },
+                { value: 'status', label: '状态' },
+                { value: 'repo', label: '仓库' },
+              ]}
+            />
             <Button
               size="sm"
               variant="secondary"
@@ -452,7 +486,67 @@ export default function DownloadsPage() {
               }
             />
           </div>
-        ) : grouped ? (
+        ) : groupMode === 'repo' ? (
+          <div className="space-y-3">
+            {repoBatches.map((batch) => {
+              const counts = countBatch(batch.tasks)
+              const summary = [
+                counts.running > 0 ? `进行中 ${counts.running}` : '',
+                counts.queued > 0 ? `排队 ${counts.queued}` : '',
+                counts.paused > 0 ? `暂停 ${counts.paused}` : '',
+                counts.completed > 0 ? `完成 ${counts.completed}` : '',
+                counts.failed > 0 ? `失败 ${counts.failed}` : '',
+                counts.cancelled > 0 ? `取消 ${counts.cancelled}` : '',
+              ].filter(Boolean)
+              return (
+                <section
+                  key={batch.key}
+                  className="overflow-hidden rounded-card border border-line bg-surface"
+                >
+                  <header className="flex flex-wrap items-center gap-2 border-b border-line bg-surface-2 px-4 py-2">
+                    <ListTree className="h-3.5 w-3.5 text-fg-muted" aria-hidden="true" />
+                    <h3 className="min-w-0 truncate text-secondary font-semibold text-fg" title={batch.repoId}>
+                      {batch.repoId}
+                    </h3>
+                    <span className="text-meta text-fg-muted">
+                      {SOURCE_LABEL[batch.source]} · {batch.revision || '默认'} · {summary.join(' · ')}
+                    </span>
+                    <div className="ml-auto flex flex-wrap items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={counts.running + counts.queued === 0 || batchBusy !== null}
+                        loading={batchBusy === batch.key}
+                        onClick={() => void handleBatch(batch, 'pause')}
+                      >
+                        暂停本批
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={counts.paused === 0 || batchBusy !== null}
+                        onClick={() => void handleBatch(batch, 'resume')}
+                      >
+                        继续本批
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={counts.failed === 0 || batchBusy !== null}
+                        onClick={() => void handleBatch(batch, 'retry')}
+                      >
+                        重试失败
+                      </Button>
+                    </div>
+                  </header>
+                  <div role="list" aria-label={`${batch.repoId} 的下载任务`}>
+                    {batch.tasks.map(renderTask)}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        ) : groupMode === 'status' ? (
           <div className="space-y-3">
             {groupedSections.map((section) => (
               <section

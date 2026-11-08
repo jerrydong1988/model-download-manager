@@ -30,7 +30,14 @@ import {
   type LibraryFileEntry,
 } from '../lib/libraryTree'
 import {
+  directoryRevisions,
+  duplicateFilePaths,
+  readLibraryView,
+  writeLibraryView,
+} from '../lib/libraryCatalog'
+import {
   deleteLocalFile,
+  listPartials,
   openPath,
   pickDirectory,
   saveSettings as saveSettingsCommand,
@@ -76,6 +83,7 @@ const MAX_LIBRARY_ROOTS = 8
 
 export default function LibraryPage() {
   const settings = useAppStore((state) => state.settings)
+  const tasks = useAppStore((state) => state.tasks)
   const setSettings = useAppStore((state) => state.setSettings)
   const setPage = useAppStore((state) => state.setPage)
   const pushToast = useAppStore((state) => state.pushToast)
@@ -94,6 +102,8 @@ export default function LibraryPage() {
   )
 
   const [files, setFiles] = useState<LocalFile[]>([])
+  const [partials, setPartials] = useState<LocalFile[]>([])
+  const [clearingPartials, setClearingPartials] = useState(false)
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [error, setError] = useState('')
   const [lastScanAt, setLastScanAt] = useState<number | null>(null)
@@ -118,12 +128,13 @@ export default function LibraryPage() {
     setStatus('loading')
     setError('')
     try {
-      const result = await scanLibrary()
+      const [result, leftover] = await Promise.all([scanLibrary(), listPartials()])
       // 防御性过滤：后端已排除临时文件，这里再兜底一次。
       const visible = result.filter(
         (file) => !file.name.endsWith('.part') && !file.name.endsWith('.part.json'),
       )
       setFiles(visible)
+      setPartials(leftover.filter((file) => file.name.endsWith('.part')))
       setLastScanAt(Date.now())
       setScanVersion((version) => version + 1)
       setStatus('ready')
@@ -177,8 +188,25 @@ export default function LibraryPage() {
     if (status !== 'ready') return
     if (expansionKeyRef.current === expansionKey) return
     expansionKeyRef.current = expansionKey
+    const saved = readLibraryView(rootsKey)
+    if (saved) {
+      setExpanded(new Set(saved.expanded))
+      setQuery(saved.query)
+      setKindFilter(saved.kind)
+      return
+    }
     setExpanded(initialExpandedPaths(rootNodes, external))
-  }, [expansionKey, external, rootNodes, status])
+  }, [expansionKey, external, rootNodes, rootsKey, status])
+
+  useEffect(() => {
+    if (status !== 'ready' || !rootsKey) return
+    writeLibraryView({
+      rootsKey,
+      expanded: [...expanded],
+      query,
+      kind: kindFilter,
+    })
+  }, [expanded, kindFilter, query, rootsKey, status])
 
   const filters = useMemo(() => ({ query, kind: kindFilter }), [kindFilter, query])
   const filterActive = isFilterActive(filters)
@@ -239,6 +267,8 @@ export default function LibraryPage() {
     return stats
   }, [files])
 
+  const duplicatePaths = useMemo(() => duplicateFilePaths(files), [files])
+  const revisions = useMemo(() => directoryRevisions(tasks), [tasks])
   const totals = useMemo(() => sumRootStats(rootNodes, external), [external, rootNodes])
   const dirNodeCount = countDirs(rootNodes, external)
   const initialLoading = status === 'loading' && files.length === 0
@@ -373,6 +403,23 @@ export default function LibraryPage() {
     }
   }
 
+  const clearPartials = useCallback(async () => {
+    if (partials.length === 0) return
+    setClearingPartials(true)
+    try {
+      for (const file of partials) {
+        await deleteLocalFile(file.path, false)
+      }
+      setPartials([])
+      pushToast('success', `已清理 ${partials.length} 个临时文件`, '已完成的模型文件没有改动。')
+    } catch (err) {
+      pushToast('error', '清理临时文件失败', toErrorText(err))
+      await loadLibrary()
+    } finally {
+      setClearingPartials(false)
+    }
+  }, [loadLibrary, partials, pushToast])
+
   const requestDelete = useCallback((file: LocalFile) => {
     setRemoveTask(true)
     setDeleteTarget(file)
@@ -461,6 +508,26 @@ export default function LibraryPage() {
           onOpen={openRootDir}
           onRescan={() => void loadLibrary()}
         />
+
+        {partials.length > 0 ? (
+          <section className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-secondary font-medium text-fg">残留临时文件</p>
+              <p className="text-meta text-fg-muted">
+                {partials.length} 个未完成的 .part 文件。清理只删除这些临时文件，不会删除已完成的模型。
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={clearingPartials}
+              onClick={() => void clearPartials()}
+              leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+            >
+              清理临时文件
+            </Button>
+          </section>
+        ) : null}
 
         {/* 目录树面板 */}
         <section className="flex min-h-[300px] flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface md:min-h-[180px]">
@@ -657,6 +724,8 @@ export default function LibraryPage() {
                   onRevealFile={revealFile}
                   onDeleteFile={requestDelete}
                   resetScrollKey={`${query}|${kindFilter}`}
+                  duplicatePaths={duplicatePaths}
+                  revisions={revisions}
                 />
               )}
 

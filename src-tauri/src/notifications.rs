@@ -19,17 +19,26 @@ use crate::util;
 const MAX_BODY_CHARS: usize = 200;
 
 /// 完成通知正文。
+pub fn completed_text(file_name: &str) -> String {
+    util::redact_urls(&format!("下载完成：{file_name}"))
+}
+
+/// 完成通知正文。
 pub fn completed_body(task: &DownloadTask) -> String {
-    util::redact_urls(&format!("下载完成：{}", task.file_name))
+    completed_text(&task.file_name)
+}
+
+/// 失败通知正文（含简短错误，已脱敏）。
+pub fn failure_text(file_name: &str, error: &str) -> String {
+    util::redact_urls(&format!(
+        "下载失败：{file_name}\n{}",
+        shorten(error, MAX_BODY_CHARS)
+    ))
 }
 
 /// 失败通知正文（含简短错误，已脱敏）。
 pub fn failed_body(task: &DownloadTask, error: &str) -> String {
-    util::redact_urls(&format!(
-        "下载失败：{}\n{}",
-        task.file_name,
-        shorten(error, MAX_BODY_CHARS)
-    ))
+    failure_text(&task.file_name, error)
 }
 
 /// 发送「下载完成」通知。
@@ -42,6 +51,11 @@ pub fn notify_completed(app: &AppHandle, task: &DownloadTask) {
 #[cfg(not(test))]
 pub fn notify_failed(app: &AppHandle, task: &DownloadTask, error: &str) {
     notify(app, &failed_body(task, error));
+}
+
+#[cfg(not(test))]
+pub fn notify_body(app: &AppHandle, body: &str) {
+    notify(app, body);
 }
 
 #[cfg(not(test))]

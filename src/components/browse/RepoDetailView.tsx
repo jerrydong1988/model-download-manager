@@ -4,6 +4,7 @@ import {
   CheckCheck,
   Download,
   FolderOpen,
+  Heart,
   Loader2,
   RefreshCw,
   Search,
@@ -37,6 +38,7 @@ import {
 import { defaultRevisionFor, formatBytes } from '../../lib/format'
 import { isTerminalStatus } from '../../lib/labels'
 import { taskMatchesDestination } from '../../lib/downloadPaths'
+import { remoteIsNewer } from '../../lib/libraryCatalog'
 import { useAppStore } from '../../store/appStore'
 import { cx } from '../../lib/cx'
 import {
@@ -85,10 +87,19 @@ export interface RepoDetailViewProps {
   initialRevision?: string
   /** 从文件链接打开时预选的仓库内路径 */
   initialFilePath?: string
+  favorite?: boolean
+  onToggleFavorite?: () => void
 }
 
 /** 仓库详情：文件多选、分类筛选、下载目录、开始下载。 */
-export function RepoDetailView({ repo, onBack, initialRevision, initialFilePath }: RepoDetailViewProps) {
+export function RepoDetailView({
+  repo,
+  onBack,
+  initialRevision,
+  initialFilePath,
+  favorite = false,
+  onToggleFavorite,
+}: RepoDetailViewProps) {
   const settings = useAppStore((state) => state.settings)
   const defaultDownloadDir = useAppStore((state) => state.defaultDownloadDir)
   const tasks = useAppStore((state) => state.tasks)
@@ -254,6 +265,9 @@ export function RepoDetailView({ repo, onBack, initialRevision, initialFilePath 
       const task = taskMap.get(file.path)
       if (!task) return null
       if (task.status === 'completed') {
+        if (remoteIsNewer(file, task)) {
+          return { label: '可更新', tone: 'amber', disabled: true }
+        }
         return { label: '已下载', tone: 'emerald', disabled: true }
       }
       if (task.status === 'error' || task.status === 'cancelled') {
@@ -469,6 +483,22 @@ export function RepoDetailView({ repo, onBack, initialRevision, initialFilePath 
               返回搜索结果
             </Button>
             <div className="flex items-center gap-2">
+              {onToggleFavorite ? (
+                <Button
+                  variant={favorite ? 'subtle' : 'ghost'}
+                  size="sm"
+                  aria-pressed={favorite}
+                  onClick={onToggleFavorite}
+                  leftIcon={
+                    <Heart
+                      className={favorite ? 'h-3.5 w-3.5 fill-current' : 'h-3.5 w-3.5'}
+                      aria-hidden="true"
+                    />
+                  }
+                >
+                  {favorite ? '已收藏' : '收藏'}
+                </Button>
+              ) : null}
               {switchingRevision ? (
                 <span
                   role="status"

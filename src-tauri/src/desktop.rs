@@ -48,17 +48,22 @@ pub fn run() {
             state.set_verify_report(Arc::new(move |task, notify_success| {
                 let sink = crate::util::AppHandleSink::new(app_handle.clone());
                 crate::util::emit_task_updated(&sink, task);
-                if !report_state.current_settings().notifications_enabled {
-                    return;
-                }
-                if task.status == crate::models::TaskStatus::Error {
-                    if let Some(error) = task.error.as_deref() {
-                        crate::notifications::notify_failed(&app_handle, task, error);
-                    }
+                let outcome = if task.status == crate::models::TaskStatus::Error {
+                    crate::batch_notice::BatchOutcome::Failure(
+                        task.error.clone().unwrap_or_default(),
+                    )
                 } else if notify_success
                     && task.verify_status == crate::models::VerifyStatus::Verified
                 {
-                    crate::notifications::notify_completed(&app_handle, task);
+                    crate::batch_notice::BatchOutcome::Success
+                } else {
+                    crate::batch_notice::BatchOutcome::Observe
+                };
+                let Some(body) = report_state.take_batch_notice(task, outcome) else {
+                    return;
+                };
+                if report_state.current_settings().notifications_enabled {
+                    crate::notifications::notify_body(&app_handle, &body);
                 }
             }));
             app.manage(state.clone());
@@ -103,6 +108,7 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::scan_library,
+            commands::list_partials,
             commands::open_path,
             commands::delete_local_file,
             commands::test_connection,

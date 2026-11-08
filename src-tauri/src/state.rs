@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
+use crate::batch_notice::{BatchLedger, BatchOutcome};
 use crate::models::{DownloadTask, Settings, Source, TaskStatus};
 use crate::util::{self, BandwidthLimiter};
 
@@ -120,6 +121,8 @@ pub struct AppState {
     terminal_dirty: AtomicBool,
     /// 校验完成后再通知界面。测试不注册，因此不会链上托盘代码。
     verify_report: Mutex<Option<VerifyReport>>,
+    /// 同一仓库尚未发出的完成/失败通知。
+    batch_ledger: Mutex<BatchLedger>,
 }
 
 impl AppState {
@@ -144,7 +147,17 @@ impl AppState {
             dirty: AtomicBool::new(false),
             terminal_dirty: AtomicBool::new(false),
             verify_report: Mutex::new(None),
+            batch_ledger: Mutex::new(BatchLedger::default()),
         }
+    }
+
+    /// 记录一次批次终态。同仓库仍有未结束任务时返回 `None`。
+    pub fn take_batch_notice(&self, task: &DownloadTask, outcome: BatchOutcome) -> Option<String> {
+        let tasks = self.tasks_snapshot();
+        self.batch_ledger
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .note(&tasks, task, outcome)
     }
 
     /// 桌面层注册校验完成回调。后注册的覆盖先前的。

@@ -155,6 +155,10 @@ export function scanLibrary(): Promise<import('../types').LocalFile[]> {
   return invokeCmd<import('../types').LocalFile[]>('scan_library')
 }
 
+export function listPartials(): Promise<import('../types').LocalFile[]> {
+  return invokeCmd<import('../types').LocalFile[]>('list_partials')
+}
+
 export function openPath(path: string, reveal: boolean): Promise<void> {
   return invokeCmd<void>('open_path', { path, reveal })
 }

@@ -88,7 +88,7 @@ export function SegmentedControl<T extends string>({
               'inline-flex cursor-pointer items-center gap-1.5 rounded-md border font-medium transition-colors duration-micro',
               variant === 'tabs' ? 'h-10 px-4 text-body' : size === 'sm' ? 'h-sm px-2.5 text-meta' : 'h-md px-3 text-meta',
               active
-                ? variant === 'tabs' ? 'border-transparent bg-primary-soft text-primary' : 'border-transparent bg-surface text-primary'
+                ? variant === 'tabs' ? 'border-transparent bg-primary-soft font-semibold text-fg' : 'border-transparent bg-surface font-semibold text-fg shadow-sm'
                 : 'border-transparent text-fg-secondary hover:bg-surface/60 hover:text-fg',
             )}
           >

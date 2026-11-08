@@ -23,7 +23,7 @@ export function Sidebar() {
   return (
     <aside className="glass-sidebar flex h-full w-[68px] shrink-0 flex-col px-2 py-6 md:w-[208px] md:px-4">
       <div className="mb-9 px-2 md:px-3">
-        <div className="mb-4 grid h-10 w-10 place-items-center rounded-card bg-primary text-primary-on">
+        <div className="mb-4 grid h-10 w-10 place-items-center rounded-card border border-primary/25 bg-primary-soft text-primary">
           <BrandMark className="h-7 w-7" strokeWidth={1.8} aria-hidden="true" />
         </div>
         <p className="hidden text-body font-semibold text-fg md:block">模型下载管理器</p>
@@ -40,11 +40,11 @@ export function Sidebar() {
             onClick={() => setPage(key)}
             className={cx(
               'flex h-11 w-full items-center justify-center gap-3 rounded-control px-3 text-body transition-colors duration-micro md:justify-start',
-              page === key ? 'bg-surface font-semibold text-primary' : 'text-fg-secondary hover:bg-surface/60 hover:text-fg',
+              page === key ? 'bg-surface font-semibold text-fg shadow-sm' : 'text-fg-secondary hover:bg-surface/60 hover:text-fg',
               key === 'settings' && 'mt-6',
             )}
           >
-            <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} aria-hidden="true" />
+            <Icon className={cx('h-[18px] w-[18px] shrink-0', page === key && 'text-primary')} strokeWidth={1.75} aria-hidden="true" />
             <span className="hidden flex-1 text-left md:block">{label}</span>
             {key === 'downloads' && running.length > 0 ? (
               <span className="hidden rounded-md bg-primary-soft px-1.5 text-meta tabular-nums text-primary md:block">{running.length}</span>

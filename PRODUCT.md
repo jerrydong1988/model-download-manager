@@ -33,7 +33,7 @@ Tauri 2 包装的 React/TypeScript 界面；Windows 优先。默认窗口 1320×
 
 ## Evidence on Hand
 
-README.md、docs/IPC-CONTRACT.md、现有源代码和 DESIGN.md。docs/screenshots 采集于 v0.4.2 配色更新之前，只说明布局。Mock 数据为演示数据，不得当成用户模型库或真实下载结果。
+README.md、docs/IPC-CONTRACT.md、现有源代码和 DESIGN.md。docs/screenshots 由浏览器 Mock 模式生成，展示当前界面，使用演示数据，不得当成用户模型库或真实下载结果。
 
 ## Product Principles
 

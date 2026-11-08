@@ -184,7 +184,7 @@ v0.4.2 用这套配色替换雾白图录的蓝紫强调。用户保留原来的�
 - 焦点环使用靛蓝，不跟强调色走。
 - 浅色与深色共用角色名；深色把薄荷绿提亮，以保证文字对比。
 
-令牌提取自 v0.4.2 的 [styles.css](src/styles.css)、[tailwind.config.js](tailwind.config.js) 和共享组件。前置 YAML 记录规范值，运行时仍由源码驱动。机器扩展见 [design.json](.impeccable/design.json)。仓库截图采集于这次配色更新之前，只说明布局，不作为当前配色样张。
+令牌提取自 v0.4.2 的 [styles.css](src/styles.css)、[tailwind.config.js](tailwind.config.js) 和共享组件。前置 YAML 记录规范值，运行时仍由源码驱动。机器扩展见 [design.json](.impeccable/design.json)。仓库截图由浏览器 Mock 模式生成，使用演示数据，展示当前浅灰目录与深色主题。
 
 ## Colors
 

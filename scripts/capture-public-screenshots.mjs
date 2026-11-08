@@ -37,7 +37,7 @@ try {
   await client.send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.setInterval = () => 0;' })
   const load = async (page, extra = '', theme = 'light') => {
     await client.navigate(`${BASE.origin}/?mock=1&capture=${Date.now()}-${++navigationIndex}${extra}#/${page}`)
-    await client.waitFor("document.body.innerText.includes('演示数据') && document.body.innerText.includes('v0.2.1')", { timeoutMs: 30000 })
+    await client.waitFor("document.body.innerText.includes('演示数据') && document.body.innerText.includes('v0.4.2')", { timeoutMs: 30000 })
     await client.evaluate(`(async () => {
       if (window.__TAURI_INTERNALS__) throw new Error('Native application capture is forbidden');
       const ipc = await import('/src/lib/ipc.ts');

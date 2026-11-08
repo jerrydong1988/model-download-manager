@@ -290,6 +290,15 @@ export function TaskRow({
               {task.fileName}
             </p>
             <StatusBadge status={task.status} />
+            {task.verifyStatus === 'pending' ? (
+              <Badge tone="amber">正在校验</Badge>
+            ) : null}
+            {task.verifyStatus === 'verified' ? (
+              <Badge tone="emerald">已校验</Badge>
+            ) : null}
+            {task.verifyStatus === 'mismatch' ? (
+              <Badge tone="red">不一致</Badge>
+            ) : null}
             {task.retries > 0 && task.status !== 'completed' ? (
               <span className="rounded-control border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-meta font-medium text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
                 重试 {task.retries} 次

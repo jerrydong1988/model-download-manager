@@ -43,6 +43,29 @@ pub fn run() {
 
             // 启动恢复：active/pausing → paused；autoResume=false 时 queued → paused。
             queue::recover(&state)?;
+            let report_state = state.clone();
+            let app_handle = app.handle().clone();
+            state.set_verify_report(Arc::new(move |task, notify_success| {
+                let sink = crate::util::AppHandleSink::new(app_handle.clone());
+                crate::util::emit_task_updated(&sink, task);
+                let outcome = if task.status == crate::models::TaskStatus::Error {
+                    crate::batch_notice::BatchOutcome::Failure(
+                        task.error.clone().unwrap_or_default(),
+                    )
+                } else if notify_success
+                    && task.verify_status == crate::models::VerifyStatus::Verified
+                {
+                    crate::batch_notice::BatchOutcome::Success
+                } else {
+                    crate::batch_notice::BatchOutcome::Observe
+                };
+                let Some(body) = report_state.take_batch_notice(task, outcome) else {
+                    return;
+                };
+                if report_state.current_settings().notifications_enabled {
+                    crate::notifications::notify_body(&app_handle, &body);
+                }
+            }));
             app.manage(state.clone());
 
             // 调度泵：autoResume 时自动继续 queued 任务。
@@ -85,12 +108,14 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::scan_library,
+            commands::list_partials,
             commands::open_path,
             commands::delete_local_file,
             commands::test_connection,
             commands::list_revisions,
             commands::get_default_download_dir,
             commands::open_data_dir,
+            commands::disk_space,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

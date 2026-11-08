@@ -227,6 +227,18 @@ pub async fn scan_library(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<
         .map_err(|err| format!("扫描本地模型库失败：{err}"))
 }
 
+/// 列出扫描根里残留的 `.part` 临时文件。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn list_partials(state: tauri::State<'_, Arc<AppState>>) -> Result<Vec<LocalFile>, String> {
+    let state = state.inner().clone();
+    let settings = state.current_settings();
+    let tasks = state.tasks_snapshot();
+    let roots = library_scan_roots(&settings);
+    tokio::task::spawn_blocking(move || crate::library::scan_partials(&roots, &tasks))
+        .await
+        .map_err(|err| format!("扫描临时文件失败：{err}"))
+}
+
 // ---------------------------------------------------------------------------
 // 16. open_path
 // ---------------------------------------------------------------------------
@@ -286,14 +298,20 @@ fn delete_local_file_impl(
         .into_iter()
         .filter(|task| task.save_path == path)
         .collect();
-    if let Some(task) = matched.iter().find(|task| !task.status.is_terminal()) {
+    let tasks = state.tasks_snapshot();
+    if let Some(task) = tasks.iter().find(|task| {
+        !task.status.is_terminal() && (task.save_path == path || task.temp_path == path)
+    }) {
         return Err(format!("任务「{}」尚未结束，请先取消下载", task.file_name));
     }
 
     std::fs::remove_file(&target).map_err(|err| format!("删除文件失败：{err}"))?;
-    // 同时清理可能残留的临时文件。
+    // 同时清理可能残留的临时文件。删除 `.part` 时，旁路元数据是同名 `.part.json`。
     let _ = std::fs::remove_file(util::with_suffix(&target, ".part"));
     let _ = std::fs::remove_file(util::with_suffix(&target, ".part.json"));
+    if path.ends_with(".part") {
+        let _ = std::fs::remove_file(util::with_suffix(&target, ".json"));
+    }
 
     if remove_task {
         let task_ids: Vec<String> = matched.iter().map(|task| task.task_id.clone()).collect();
@@ -352,4 +370,17 @@ pub fn get_default_download_dir() -> Result<String, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn open_data_dir(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
     util::open_in_explorer(&state.inner().data_dir, false)
+}
+
+// ---------------------------------------------------------------------------
+// 22. disk_space
+// ---------------------------------------------------------------------------
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn disk_space(path: String) -> Result<crate::models::DiskSpace, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("请选择下载目录后再检查磁盘空间".to_string());
+    }
+    util::disk_space(std::path::Path::new(trimmed))
 }

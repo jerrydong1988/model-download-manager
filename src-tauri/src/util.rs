@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::models::{DownloadTask, FileKind, Settings};
+use crate::models::{DiskSpace, DownloadTask, FileKind, Settings};
 
 // ---------------------------------------------------------------------------
 // 时间
@@ -582,6 +582,82 @@ impl EventSink for AppHandleSink {
     }
 }
 
+/// 从路径取出盘符或 UNC 共享名，供磁盘预检文案使用。
+pub fn volume_label(path: &Path) -> String {
+    for component in path.components() {
+        if let Component::Prefix(prefix) = component {
+            match prefix.kind() {
+                std::path::Prefix::Disk(letter) | std::path::Prefix::VerbatimDisk(letter) => {
+                    return format!("{}:", (letter as char).to_ascii_uppercase());
+                }
+                std::path::Prefix::UNC(server, share)
+                | std::path::Prefix::VerbatimUNC(server, share) => {
+                    return format!(
+                        "\\\\{}\\{}",
+                        server.to_string_lossy(),
+                        share.to_string_lossy()
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    path.display().to_string()
+}
+
+/// 读取 `path` 所在卷的可用空间。目录尚不存在时向父级回退，直到找到已存在的路径。
+pub fn disk_space(path: &Path) -> Result<DiskSpace, String> {
+    if path.as_os_str().is_empty() {
+        return Err("请选择下载目录后再检查磁盘空间".to_string());
+    }
+    let mut probe = path.to_path_buf();
+    if !probe.exists() {
+        while !probe.exists() {
+            if !probe.pop() {
+                return Err("无法读取磁盘空间：目录不存在".to_string());
+            }
+        }
+    }
+    let (free_bytes, total_bytes) = query_disk_space(&probe)?;
+    Ok(DiskSpace {
+        free_bytes,
+        total_bytes,
+        volume: volume_label(path),
+    })
+}
+
+#[cfg(windows)]
+fn query_disk_space(path: &Path) -> Result<(u64, u64), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lp_directory_name: *const u16,
+            lp_free_bytes_available_to_caller: *mut u64,
+            lp_total_number_of_bytes: *mut u64,
+            lp_total_number_of_free_bytes: *mut u64,
+        ) -> i32;
+    }
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut available = 0u64;
+    let mut total = 0u64;
+    let mut free = 0u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, &mut total, &mut free)
+    };
+    if ok == 0 {
+        return Err("无法读取磁盘剩余空间".to_string());
+    }
+    Ok((available, total))
+}
+
+#[cfg(not(windows))]
+fn query_disk_space(_path: &Path) -> Result<(u64, u64), String> {
+    Err("当前系统不支持读取磁盘空间".to_string())
+}
+
 /// 发送 `task-updated { task }`。
 pub fn emit_task_updated(sink: &dyn EventSink, task: &DownloadTask) {
     match serde_json::to_value(task) {
@@ -1135,6 +1211,20 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn disk_space_reports_temp_volume() {
+        assert_eq!(volume_label(Path::new(r"D:\Models\Qwen")), "D:");
+        assert_eq!(
+            volume_label(Path::new(r"\\server\share\models")),
+            r"\\server\share"
+        );
+        let space = disk_space(std::env::temp_dir().as_path()).expect("应能读取临时目录所在卷");
+        assert!(space.free_bytes > 0);
+        assert!(space.total_bytes >= space.free_bytes);
+        assert!(space.volume.contains(':'));
     }
 
     #[test]

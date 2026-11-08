@@ -592,6 +592,8 @@ async fn retry_counter_reports_two_retries_then_completes() {
         completed_at: None,
         etag: None,
         last_modified: None,
+        sha256: None,
+        verify_status: model_download_manager_lib::models::VerifyStatus::Unavailable,
     }]);
 
     let seen: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1258,6 +1260,7 @@ fn audit_distinct_sources_do_not_share_writable_output() {
         size: 1000,
         save_dir: settings.download_dir.clone(),
         revision: None,
+        sha256: None,
     };
     let tasks = queue::start_downloads(
         &state,

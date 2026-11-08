@@ -13,6 +13,7 @@ import type {
   AppSnapshot,
   CancelDownloadArgs,
   DeleteLocalFileArgs,
+  DiskSpace,
   DownloadRequest,
   DownloadTask,
   ListRevisionsArgs,
@@ -154,6 +155,10 @@ export function scanLibrary(): Promise<import('../types').LocalFile[]> {
   return invokeCmd<import('../types').LocalFile[]>('scan_library')
 }
 
+export function listPartials(): Promise<import('../types').LocalFile[]> {
+  return invokeCmd<import('../types').LocalFile[]>('list_partials')
+}
+
 export function openPath(path: string, reveal: boolean): Promise<void> {
   return invokeCmd<void>('open_path', { path, reveal })
 }
@@ -175,6 +180,11 @@ export function getDefaultDownloadDir(): Promise<string> {
 
 export function openDataDir(): Promise<void> {
   return invokeCmd<void>('open_data_dir')
+}
+
+/** 读取保存目录所在卷的可用空间。 */
+export function getDiskSpace(path: string): Promise<DiskSpace> {
+  return invokeCmd<DiskSpace>('disk_space', { path })
 }
 
 /* ------------------------------------------------------------------ */

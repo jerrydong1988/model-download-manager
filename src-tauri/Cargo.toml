@@ -1,6 +1,6 @@
 [package]
 name = "model-download-manager"
-version = "0.3.0"
+version = "0.4.0"
 description = "ModelScope / HuggingFace 模型下载管理器"
 authors = ["jerrydong1988"]
 license = "MIT"
@@ -35,6 +35,7 @@ bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 percent-encoding = "2"
+sha2 = "0.10"
 
 [profile.release]
 panic = "abort"

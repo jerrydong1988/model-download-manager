@@ -438,6 +438,8 @@ export function createMockBridge(): MockBridge {
             retries: 0,
             revision: request.revision?.trim() || defaultRevisionFor(request.source),
             addedAt: now + created.length,
+            sha256: request.sha256,
+            verifyStatus: request.sha256 ? 'pending' : 'unavailable',
           }
           tasks.push(task)
           created.push(task)
@@ -556,6 +558,20 @@ export function createMockBridge(): MockBridge {
         return result(clone(settings))
       }
 
+      case 'list_partials': {
+        if (emptyFixture || library.length === 0) return result([])
+        const sample = library[0]
+        return result([
+          {
+            ...clone(sample),
+            path: `${sample.path}.part`,
+            name: `${sample.name}.part`,
+            size: 4096,
+            kind: 'other' as const,
+          },
+        ])
+      }
+
       case 'scan_library': {
         if (emptyFixture) return result([])
         const sorted = [...library].sort((a, b) => b.modifiedAt - a.modifiedAt)
@@ -618,6 +634,16 @@ export function createMockBridge(): MockBridge {
 
       case 'open_data_dir':
         return result(undefined)
+
+      case 'disk_space': {
+        const path = String((args as { path?: string }).path ?? '')
+        const drive = path.match(/^([A-Za-z]:)/)
+        return result({
+          freeBytes: 2_000_000_000_000,
+          totalBytes: 4_000_000_000_000,
+          volume: drive?.[1]?.toUpperCase() ?? path,
+        })
+      }
 
       default:
         throw new Error(`mock 模式未实现的命令：${command}`)

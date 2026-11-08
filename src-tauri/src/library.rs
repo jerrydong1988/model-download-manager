@@ -27,7 +27,24 @@ pub fn scan_library(roots: &[PathBuf], tasks: &[DownloadTask]) -> Vec<LocalFile>
         if !root.is_dir() {
             continue;
         }
-        walk(root, root, 0, &mut files, &mut seen, tasks);
+        walk(root, root, 0, &mut files, &mut seen, tasks, false);
+    }
+    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    files
+}
+
+/// 只收集下载残留的 `.part` 文件，不包含已完成模型和 `.part.json`。
+pub fn scan_partials(roots: &[PathBuf], tasks: &[DownloadTask]) -> Vec<LocalFile> {
+    let mut files = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for root in roots {
+        if files.len() >= MAX_FILES {
+            break;
+        }
+        if !root.is_dir() {
+            continue;
+        }
+        walk(root, root, 0, &mut files, &mut seen, tasks, true);
     }
     files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
     files
@@ -40,6 +57,7 @@ fn walk(
     out: &mut Vec<LocalFile>,
     seen: &mut HashSet<String>,
     tasks: &[DownloadTask],
+    partials_only: bool,
 ) {
     if out.len() >= MAX_FILES {
         return;
@@ -60,7 +78,7 @@ fn walk(
         }
         if file_type.is_dir() {
             if depth < MAX_DEPTH {
-                walk(root, &entry.path(), depth + 1, out, seen, tasks);
+                walk(root, &entry.path(), depth + 1, out, seen, tasks, partials_only);
             }
             continue;
         }
@@ -68,8 +86,13 @@ fn walk(
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        // 跳过下载临时文件。
-        if name.ends_with(".part") || name.ends_with(".part.json") {
+        let is_part = name.ends_with(".part") && !name.ends_with(".part.json");
+        let is_temp = name.ends_with(".part") || name.ends_with(".part.json");
+        if partials_only {
+            if !is_part {
+                continue;
+            }
+        } else if is_temp {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -85,7 +108,13 @@ fn walk(
             continue;
         }
         let path = path_buf.to_string_lossy().into_owned();
-        let history = tasks.iter().find(|task| task.save_path == path);
+        let history = tasks.iter().find(|task| {
+            if partials_only {
+                task.temp_path == path
+            } else {
+                task.save_path == path
+            }
+        });
         let modified_at = metadata
             .modified()
             .ok()
@@ -143,6 +172,8 @@ mod tests {
             completed_at: Some(2),
             etag: None,
             last_modified: None,
+            sha256: None,
+            verify_status: crate::models::VerifyStatus::Unavailable,
         }
     }
 
@@ -175,6 +206,18 @@ mod tests {
             root.to_string_lossy(),
             "rootDir 应为扫描根"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_partials_returns_only_part_files() {
+        let root = unique_dir("partials");
+        std::fs::write(root.join("done.safetensors"), [1u8; 4]).unwrap();
+        std::fs::write(root.join("done.safetensors.part"), [2u8; 2]).unwrap();
+        std::fs::write(root.join("done.safetensors.part.json"), b"{}").unwrap();
+        let files = scan_partials(&[root.clone()], &[]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "done.safetensors.part");
         let _ = std::fs::remove_dir_all(&root);
     }
 

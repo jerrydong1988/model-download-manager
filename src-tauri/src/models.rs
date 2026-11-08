@@ -191,6 +191,9 @@ pub struct RepoFile {
     /// 字节；未知为 0
     pub size: u64,
     pub kind: FileKind,
+    /// 内容 sha256（小写十六进制）。HF 来自 LFS oid，ModelScope 来自 `Sha256`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// 仓库详情（命令 3）。
@@ -213,6 +216,17 @@ pub struct RepoDetail {
     pub gated: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+}
+
+/// 下载完成后的内容校验。旧任务缺省为 `unavailable`（无校验和）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum VerifyStatus {
+    #[default]
+    Unavailable,
+    Pending,
+    Verified,
+    Mismatch,
 }
 
 /// 下载任务（命令 4-12 / `task-updated` 事件 payload 的 `task`）。
@@ -255,6 +269,12 @@ pub struct DownloadTask {
     pub etag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
+    /// 期望的内容 sha256。没有远端校验和时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// 完成后的校验结果。校验在改名之后异步进行，不占用下载并发槽。
+    #[serde(default)]
+    pub verify_status: VerifyStatus,
 }
 
 impl DownloadTask {
@@ -279,6 +299,20 @@ pub struct DownloadRequest {
     /// v0.2.0：可空；缺省用来源默认 revision（HF `main` / MS `master`）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+    /// 可空；仓库列表中的 sha256
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
+/// 目标目录所在卷的可用空间（命令 22）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskSpace {
+    /// 调用方可用字节
+    pub free_bytes: u64,
+    pub total_bytes: u64,
+    /// 盘符或 UNC 共享，如 `D:`、`\\server\share`
+    pub volume: String,
 }
 
 /// 本地模型库文件（命令 15）。

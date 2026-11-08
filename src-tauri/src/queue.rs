@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 #[cfg(not(test))]
 use crate::download::{self, TransferContext};
 use crate::download::{read_part_progress, DownloadError, TransferOutcome};
-use crate::models::{DownloadRequest, DownloadTask, TaskStatus};
+use crate::models::{DownloadRequest, DownloadTask, TaskStatus, VerifyStatus};
 #[cfg(not(test))]
 use crate::sources;
 use crate::state::{AppState, TaskControl, TransitionOutcome};
@@ -90,6 +90,107 @@ fn notify_terminal(
     match error {
         Some(error) => crate::notifications::notify_failed(app, task, error),
         None => crate::notifications::notify_completed(app, task),
+    }
+}
+
+fn normalized_sha(raw: Option<&str>) -> Option<String> {
+    raw.and_then(crate::integrity::normalize_sha256)
+}
+
+struct VerifyJob {
+    state: Arc<AppState>,
+    task_id: String,
+    save_path: String,
+    expected: String,
+    #[cfg_attr(test, allow(dead_code))]
+    notify_success: bool,
+    #[cfg(not(test))]
+    app: Option<tauri::AppHandle>,
+}
+
+/// 改名之后比对 sha256。不一致则把任务改为失败，并删除损坏文件，避免按大小被当成已完成。
+fn apply_verify_outcome(
+    state: &Arc<AppState>,
+    task_id: &str,
+    save_path: &str,
+    outcome: crate::integrity::ContentCheck,
+) -> Option<DownloadTask> {
+    let updated = match outcome {
+        crate::integrity::ContentCheck::Match => {
+            state.transition_task(task_id, &[TaskStatus::Completed], |task| {
+                task.verify_status = VerifyStatus::Verified;
+                task.error = None;
+            })
+        }
+        crate::integrity::ContentCheck::Mismatch { actual } => {
+            let expected = state
+                .get_task(task_id)
+                .and_then(|task| task.sha256)
+                .unwrap_or_default();
+            let message = format!(
+                "文件校验不一致（期望 {expected}，实际 {actual}）。已删除损坏文件，可重试下载。"
+            );
+            let updated = state.transition_task(task_id, &[TaskStatus::Completed], |task| {
+                task.status = TaskStatus::Error;
+                task.verify_status = VerifyStatus::Mismatch;
+                task.speed = 0;
+                task.error = Some(message);
+            });
+            if matches!(updated, TransitionOutcome::Updated(_)) {
+                let _ = std::fs::remove_file(save_path);
+            }
+            updated
+        }
+        crate::integrity::ContentCheck::Unreadable { message } => {
+            state.transition_task(task_id, &[TaskStatus::Completed], |task| {
+                task.status = TaskStatus::Error;
+                task.verify_status = VerifyStatus::Unavailable;
+                task.speed = 0;
+                task.error = Some(format!("下载已写入，但无法校验文件：{message}"));
+            })
+        }
+    };
+    match updated {
+        TransitionOutcome::Updated(task) => {
+            state.mark_dirty(true);
+            Some(task)
+        }
+        TransitionOutcome::Conflict(_) | TransitionOutcome::Missing => None,
+    }
+}
+
+fn schedule_content_verify(job: VerifyJob) {
+    let work = move || {
+        let outcome = crate::integrity::check_file(Path::new(&job.save_path), &job.expected);
+        let Some(task) = apply_verify_outcome(&job.state, &job.task_id, &job.save_path, outcome) else {
+            return;
+        };
+        #[cfg(not(test))]
+        if let Some(app) = &job.app {
+            use tauri::Emitter;
+            if let Ok(value) = serde_json::to_value(&task) {
+                let _ = app.emit("task-updated", serde_json::json!({ "task": value }));
+            }
+            if job.state.current_settings().notifications_enabled {
+                if task.status == TaskStatus::Error {
+                    if let Some(error) = task.error.as_deref() {
+                        crate::notifications::notify_failed(app, &task, error);
+                    }
+                } else if job.notify_success && task.verify_status == VerifyStatus::Verified {
+                    crate::notifications::notify_completed(app, &task);
+                }
+            }
+        }
+        #[cfg(test)]
+        let _ = task;
+    };
+    #[cfg(test)]
+    work();
+    #[cfg(not(test))]
+    {
+        if let Err(error) = std::thread::Builder::new().name("mdm-verify".into()).spawn(work) {
+            eprintln!("无法启动文件校验线程：{error}");
+        }
     }
 }
 
@@ -336,6 +437,7 @@ fn finish_task(
             etag,
             last_modified,
         }) => {
+            let expected_sha = normalized_sha(current.sha256.as_deref());
             let updated = state.transition_task(task_id, &expected, |task| {
                 task.status = TaskStatus::Completed;
                 task.downloaded = downloaded;
@@ -345,15 +447,36 @@ fn finish_task(
                 task.completed_at = Some(util::now_millis());
                 task.etag = etag;
                 task.last_modified = last_modified;
+                task.verify_status = if expected_sha.is_some() {
+                    VerifyStatus::Pending
+                } else {
+                    VerifyStatus::Unavailable
+                };
             });
+            let accepted = matches!(updated, TransitionOutcome::Updated(_));
             if let TransitionOutcome::Updated(task) = updated {
                 util::emit_task_updated(sink, &task);
-                // v0.1.3：下载完成系统通知（受 notificationsEnabled 控制；单元测试构建不编译）。
-                #[cfg(not(test))]
-                notify_terminal(sink, state, &task, None);
+                // 没有校验和时立即通知完成。有校验和则先释放并发槽，再在后台比对。
+                if expected_sha.is_none() {
+                    #[cfg(not(test))]
+                    notify_terminal(sink, state, &task, None);
+                }
             }
             state.remove_control(task_id);
             state.mark_dirty(true);
+            if accepted {
+                if let Some(expected_sha) = expected_sha {
+                    schedule_content_verify(VerifyJob {
+                        state: state.clone(),
+                        task_id: task_id.to_string(),
+                        save_path: current.save_path.clone(),
+                        expected: expected_sha,
+                        notify_success: true,
+                        #[cfg(not(test))]
+                        app: sink.app_handle().cloned(),
+                    });
+                }
+            }
         }
         Ok(TransferOutcome::Paused {
             downloaded,
@@ -474,6 +597,19 @@ pub fn start_downloads(
     state.insert_tasks(created.clone());
     for task in &created {
         util::emit_task_updated(sink, task);
+        if task.status == TaskStatus::Completed {
+            if let Some(expected) = task.sha256.clone() {
+                schedule_content_verify(VerifyJob {
+                    state: state.clone(),
+                    task_id: task.task_id.clone(),
+                    save_path: task.save_path.clone(),
+                    expected,
+                    notify_success: false,
+                    #[cfg(not(test))]
+                    app: sink.app_handle().cloned(),
+                });
+            }
+        }
     }
     if has_queued {
         state.scheduler.notify_one();
@@ -553,7 +689,13 @@ fn build_task_from_request(
     let existing_length = std::fs::metadata(&paths.final_path)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
+    let sha256 = normalized_sha(request.sha256.as_deref());
     let already_completed = total_size > 0 && existing_length == total_size;
+    let verify_status = if already_completed && sha256.is_some() {
+        VerifyStatus::Pending
+    } else {
+        VerifyStatus::Unavailable
+    };
 
     *now = now.saturating_add(1); // 保证同毫秒入队仍保持 FIFO
     let added_at = *now;
@@ -593,6 +735,8 @@ fn build_task_from_request(
         },
         etag: progress.etag,
         last_modified: progress.last_modified,
+        sha256,
+        verify_status,
     }))
 }
 
@@ -910,6 +1054,7 @@ mod tests {
             size,
             save_dir: save_dir.to_string_lossy().into_owned(),
             revision: None,
+            sha256: None,
         }
     }
 
@@ -1152,6 +1297,8 @@ mod tests {
             completed_at: None,
             etag: None,
             last_modified: None,
+            sha256: None,
+            verify_status: VerifyStatus::Unavailable,
         };
         let persisted = PersistedTasks::new(vec![
             make_task("active", TaskStatus::Active),
@@ -1260,6 +1407,8 @@ mod tests {
             completed_at: None,
             etag: None,
             last_modified: None,
+            sha256: None,
+            verify_status: VerifyStatus::Unavailable,
         };
         // 模拟旧版 tasks.json：缺少 revision 字段。
         let mut value = serde_json::to_value(&task).unwrap();
@@ -1274,6 +1423,44 @@ mod tests {
             restored.revision, "master",
             "旧任务缺失 revision 时按来源默认值补齐"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn existing_file_is_verified_or_rejected_by_sha256() {
+        let hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let (state, dir) = sample_state(true);
+        let sink = RecordingSink::default();
+        let models = dir.join("models");
+        let final_path = models.join("org").join("model").join("a.bin");
+        std::fs::create_dir_all(final_path.parent().unwrap()).unwrap();
+        std::fs::write(&final_path, b"abc").unwrap();
+
+        let mut request = sample_request(&models, "a.bin", 3);
+        request.sha256 = Some(format!("sha256:{hex}"));
+        let created = start_downloads(&state, vec![request], &sink).unwrap();
+        assert_eq!(created.len(), 1);
+        let stored = state.get_task(&created[0].task_id).unwrap();
+        assert_eq!(stored.status, TaskStatus::Completed);
+        assert_eq!(stored.verify_status, VerifyStatus::Verified);
+        assert_eq!(stored.sha256.as_deref(), Some(hex));
+        assert!(final_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let (state, dir) = sample_state(true);
+        let models = dir.join("models");
+        let final_path = models.join("org").join("model").join("a.bin");
+        std::fs::create_dir_all(final_path.parent().unwrap()).unwrap();
+        std::fs::write(&final_path, b"abc").unwrap();
+        let mut request = sample_request(&models, "a.bin", 3);
+        request.sha256 = Some("a".repeat(64));
+        let created = start_downloads(&state, vec![request], &sink).unwrap();
+        let stored = state.get_task(&created[0].task_id).unwrap();
+        assert_eq!(stored.status, TaskStatus::Error);
+        assert_eq!(stored.verify_status, VerifyStatus::Mismatch);
+        assert!(stored.error.unwrap_or_default().contains("校验不一致"));
+        assert!(!final_path.exists(), "校验失败的文件应删除，避免下次按大小跳过");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

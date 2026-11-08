@@ -13,6 +13,7 @@ import type {
   AppSnapshot,
   CancelDownloadArgs,
   DeleteLocalFileArgs,
+  DiskSpace,
   DownloadRequest,
   DownloadTask,
   ListRevisionsArgs,
@@ -175,6 +176,11 @@ export function getDefaultDownloadDir(): Promise<string> {
 
 export function openDataDir(): Promise<void> {
   return invokeCmd<void>('open_data_dir')
+}
+
+/** 读取保存目录所在卷的可用空间。 */
+export function getDiskSpace(path: string): Promise<DiskSpace> {
+  return invokeCmd<DiskSpace>('disk_space', { path })
 }
 
 /* ------------------------------------------------------------------ */

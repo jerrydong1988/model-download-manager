@@ -94,6 +94,8 @@ mod tests {
             completed_at: Some(2),
             etag: None,
             last_modified: None,
+            sha256: None,
+            verify_status: crate::models::VerifyStatus::Unavailable,
         }
     }
 

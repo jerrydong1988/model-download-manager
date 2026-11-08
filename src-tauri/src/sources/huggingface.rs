@@ -49,6 +49,8 @@ struct HfTreeEntry {
 struct HfLfs {
     #[serde(default)]
     size: Option<u64>,
+    #[serde(default)]
+    oid: Option<String>,
 }
 
 /// `GET /api/models/{repo}` 仓库信息。
@@ -184,7 +186,16 @@ pub async fn detail(
             if entry.entry_type != "file" || entry.path.is_empty() {
                 continue;
             }
-            let size = entry.lfs.and_then(|lfs| lfs.size).unwrap_or(entry.size);
+            let sha256 = entry
+                .lfs
+                .as_ref()
+                .and_then(|lfs| lfs.oid.as_deref())
+                .and_then(crate::integrity::normalize_sha256);
+            let size = entry
+                .lfs
+                .as_ref()
+                .and_then(|lfs| lfs.size)
+                .unwrap_or(entry.size);
             let name = entry
                 .path
                 .rsplit('/')
@@ -197,6 +208,7 @@ pub async fn detail(
                 name,
                 size,
                 kind,
+                sha256,
             });
         }
         next = next_candidate;

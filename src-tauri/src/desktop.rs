@@ -91,6 +91,7 @@ pub fn run() {
             commands::list_revisions,
             commands::get_default_download_dir,
             commands::open_data_dir,
+            commands::disk_space,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

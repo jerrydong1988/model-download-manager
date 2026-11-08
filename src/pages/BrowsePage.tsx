@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Compass, RefreshCw, Search, X } from '../components/icons'
 import type { RepoSearchPage, RepoSummary, Source } from '../types'
 import { searchRepos, toErrorText } from '../lib/ipc'
+import { looksLikeUrl, parseRepoLink } from '../lib/repoLink'
 import { RepoCard } from '../components/browse/RepoCard'
 import { RepoDetailView } from '../components/browse/RepoDetailView'
 import { Button } from '../components/ui/Button'
@@ -17,6 +18,12 @@ import {
 } from '../components/layout/useGlobalShortcuts'
 
 type SearchStatus = 'idle' | 'loading' | 'loadingMore' | 'ready' | 'error'
+
+interface OpenedRepo {
+  repo: RepoSummary
+  revision?: string
+  filePath?: string
+}
 
 const PAGE_SIZE = 8
 
@@ -63,7 +70,10 @@ export default function BrowsePage() {
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState<SearchStatus>('idle')
   const [error, setError] = useState('')
-  const [selectedRepo, setSelectedRepo] = useState<RepoSummary | null>(repoFromUrl)
+  const [selectedRepo, setSelectedRepo] = useState<OpenedRepo | null>(() => {
+    const repo = repoFromUrl()
+    return repo ? { repo } : null
+  })
 
   const requestSeq = useRef(0)
   const lastAutoQuery = useRef('')
@@ -110,6 +120,32 @@ export default function BrowsePage() {
     [],
   )
 
+  const openParsedLink = useCallback((raw: string): boolean => {
+    const parsed = parseRepoLink(raw)
+    if (!parsed) {
+      if (looksLikeUrl(raw)) {
+        useAppStore.getState().pushToast('error', '无法识别这个仓库链接', '请粘贴 HuggingFace 或 ModelScope 的仓库页、blob 或 resolve 链接。')
+        return true
+      }
+      return false
+    }
+    lastAutoQuery.current = parsed.repoId
+    setQuery(parsed.repoId)
+    setSource(parsed.source)
+    setSelectedRepo({
+      repo: {
+        id: parsed.repoId,
+        source: parsed.source,
+        downloads: 0,
+        likes: 0,
+        tags: [],
+      },
+      revision: parsed.revision,
+      filePath: parsed.filePath,
+    })
+    return true
+  }, [])
+
   const resetAndSearch = useCallback(
     (nextQuery: string) => {
       lastAutoQuery.current = nextQuery
@@ -132,9 +168,15 @@ export default function BrowsePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source])
 
-  // 输入防抖：停止输入 420ms 后自动搜索。
+  // 输入防抖：停止输入 420ms 后自动搜索。完整仓库链接则直接打开。
   useEffect(() => {
     if (query === lastAutoQuery.current) return
+    if (parseRepoLink(query) || looksLikeUrl(query)) {
+      const timer = window.setTimeout(() => {
+        openParsedLink(query)
+      }, 420)
+      return () => window.clearTimeout(timer)
+    }
     const timer = window.setTimeout(() => {
       lastAutoQuery.current = query
       setPage(1)
@@ -143,7 +185,7 @@ export default function BrowsePage() {
       void runSearch({ query, source, page: 1, reset: true })
     }, 420)
     return () => window.clearTimeout(timer)
-  }, [query, runSearch, source])
+  }, [openParsedLink, query, runSearch, source])
 
   // 全局快捷键：Ctrl/Cmd+F 聚焦搜索框；F5 重新搜索当前关键词。
   useEffect(() => {
@@ -171,6 +213,7 @@ export default function BrowsePage() {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (openParsedLink(query)) return
     resetAndSearch(query)
   }
 
@@ -204,8 +247,10 @@ export default function BrowsePage() {
   if (selectedRepo) {
     return (
       <RepoDetailView
-        key={`${selectedRepo.source}:${selectedRepo.id}`}
-        repo={selectedRepo}
+        key={`${selectedRepo.repo.source}:${selectedRepo.repo.id}:${selectedRepo.revision ?? ''}:${selectedRepo.filePath ?? ''}`}
+        repo={selectedRepo.repo}
+        initialRevision={selectedRepo.revision}
+        initialFilePath={selectedRepo.filePath}
         onBack={() => setSelectedRepo(null)}
       />
     )
@@ -243,8 +288,8 @@ export default function BrowsePage() {
                   aria-label="搜索仓库"
                   placeholder={
                     source === 'huggingface'
-                      ? '搜索 HuggingFace 仓库，例如 Qwen/Qwen2.5-7B-Instruct'
-                      : '搜索 ModelScope 仓库，例如 Qwen/Qwen2.5-7B-Instruct'
+                      ? '搜索仓库，或粘贴 HuggingFace 链接'
+                      : '搜索仓库，或粘贴 ModelScope 链接'
                   }
                   className="h-12 w-full rounded-control border border-line-strong bg-surface pl-11 pr-9 text-body text-fg transition-colors duration-micro placeholder:text-fg-muted focus-visible:border-primary"
                 />
@@ -365,7 +410,7 @@ export default function BrowsePage() {
                 <RepoCard
                   key={`${repo.source}:${repo.id}`}
                   repo={repo}
-                  onOpen={setSelectedRepo}
+                  onOpen={(repo) => setSelectedRepo({ repo })}
                 />
               ))}
             </div>

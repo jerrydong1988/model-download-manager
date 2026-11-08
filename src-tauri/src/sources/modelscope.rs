@@ -76,6 +76,11 @@ fn number_at(value: &Value, keys: &[&str]) -> u64 {
     0
 }
 
+/// ModelScope 文件条目上的内容校验和。只接受 `Sha256` 字段。
+pub(crate) fn entry_sha256(entry: &Value) -> Option<String> {
+    string_at(entry, &["Sha256", "sha256"]).and_then(|raw| crate::integrity::normalize_sha256(&raw))
+}
+
 fn string_at(value: &Value, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(text) = value.get(*key).and_then(Value::as_str) {
@@ -322,11 +327,13 @@ pub async fn detail(
             .unwrap_or_else(|| number_at(&entry, &["Size", "FileSize"]));
         let name = path.rsplit('/').next().unwrap_or(&path).to_string();
         let kind = util::classify_file(&path);
+        let sha256 = entry_sha256(&entry);
         files.push(RepoFile {
             path,
             name,
             size,
             kind,
+            sha256,
         });
     }
 
@@ -476,6 +483,20 @@ pub async fn list_revisions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entry_sha256_reads_hex_and_ignores_blank() {
+        let entry = serde_json::json!({
+            "Sha256": "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
+            "Size": 3
+        });
+        assert_eq!(
+            entry_sha256(&entry).as_deref(),
+            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+        assert!(entry_sha256(&serde_json::json!({"Sha256": ""})).is_none());
+        assert!(entry_sha256(&serde_json::json!({"Oid": "not-a-hash"})).is_none());
+    }
 
     #[test]
     fn collect_revision_names_reads_nested_data() {

@@ -353,3 +353,16 @@ pub fn get_default_download_dir() -> Result<String, String> {
 pub fn open_data_dir(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
     util::open_in_explorer(&state.inner().data_dir, false)
 }
+
+// ---------------------------------------------------------------------------
+// 22. disk_space
+// ---------------------------------------------------------------------------
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn disk_space(path: String) -> Result<crate::models::DiskSpace, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("请选择下载目录后再检查磁盘空间".to_string());
+    }
+    util::disk_space(std::path::Path::new(trimmed))
+}

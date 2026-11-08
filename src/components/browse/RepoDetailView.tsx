@@ -18,12 +18,22 @@ import type {
   RevisionList,
 } from '../../types'
 import {
+  getDiskSpace,
   getRepoDetail,
   listRevisions,
   pickDirectory,
   startDownloads,
   toErrorText,
 } from '../../lib/ipc'
+import { assessDisk, type DiskAssessment } from '../../lib/diskSpace'
+import {
+  defaultSelectedPaths,
+  pathsForQuant,
+  pathsForShard,
+  quantChoices,
+  samePathSet,
+  shardChoices,
+} from '../../lib/fileSelection'
 import { defaultRevisionFor, formatBytes } from '../../lib/format'
 import { isTerminalStatus } from '../../lib/labels'
 import { taskMatchesDestination } from '../../lib/downloadPaths'
@@ -71,10 +81,14 @@ function findTask(
 export interface RepoDetailViewProps {
   repo: RepoSummary
   onBack: () => void
+  /** 从链接打开时使用的 revision；空则用来源默认值 */
+  initialRevision?: string
+  /** 从文件链接打开时预选的仓库内路径 */
+  initialFilePath?: string
 }
 
 /** 仓库详情：文件多选、分类筛选、下载目录、开始下载。 */
-export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
+export function RepoDetailView({ repo, onBack, initialRevision, initialFilePath }: RepoDetailViewProps) {
   const settings = useAppStore((state) => state.settings)
   const defaultDownloadDir = useAppStore((state) => state.defaultDownloadDir)
   const tasks = useAppStore((state) => state.tasks)
@@ -91,7 +105,11 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   const [picking, setPicking] = useState(false)
   const [starting, setStarting] = useState(false)
   // v0.2.0：revision 选择
-  const [revision, setRevision] = useState(() => defaultRevisionFor(repo.source))
+  const [revision, setRevision] = useState(
+    () => initialRevision?.trim() || defaultRevisionFor(repo.source),
+  )
+  const [disk, setDisk] = useState<DiskAssessment | null>(null)
+  const [diskNote, setDiskNote] = useState('')
   const [revisions, setRevisions] = useState<RevisionList | null>(null)
   const [revisionsLoading, setRevisionsLoading] = useState(true)
   const [revisionsError, setRevisionsError] = useState<string | null>(null)
@@ -103,6 +121,8 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   const saveDirRef = useRef(saveDir)
   saveDirRef.current = saveDir
   const detailRequestSeq = useRef(0)
+  const presetFile = useRef(initialFilePath?.trim() ?? '')
+  const pinRevision = useRef(Boolean(initialRevision?.trim()))
 
   const loadDetail = useCallback(
     async (targetRevision: string): Promise<boolean> => {
@@ -116,17 +136,28 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
         detailRef.current = result
         setDetail(result)
         setStatus('ready')
-        // 默认勾选所有尚未下载/入队的模型文件（权重 + 投影器；权重矩阵不默认选）。
         const existing = useAppStore.getState().tasks
-        const nextSelected = new Set<string>()
-        for (const file of result.files) {
-          if (file.kind !== 'weight' && file.kind !== 'mmproj') continue
-          const task = findTask(existing, repo.source, repo.id, file.path, result.revision,
-            saveDirRef.current || useAppStore.getState().settings?.downloadDir || '')
-          if (task && (task.status === 'completed' || !isTerminalStatus(task.status))) continue
-          nextSelected.add(file.path)
+        const saveDirNow = saveDirRef.current || useAppStore.getState().settings?.downloadDir || ''
+        const occupied = (file: RepoFile) => {
+          const task = findTask(existing, repo.source, repo.id, file.path, result.revision, saveDirNow)
+          return Boolean(task && (task.status === 'completed' || !isTerminalStatus(task.status)))
         }
-        setSelected(nextSelected)
+        const wanted = presetFile.current
+        if (wanted) {
+          presetFile.current = ''
+          const match = result.files.find((file) => file.path === wanted)
+          if (match && !occupied(match)) {
+            setSelected(new Set([match.path]))
+            return true
+          }
+          if (match) {
+            useAppStore.getState().pushToast('info', '链接中的文件已在队列或已下载', wanted)
+          } else {
+            useAppStore.getState().pushToast('info', '链接中的文件不在当前文件列表', wanted)
+          }
+        }
+        // 多个量化档时只勾选推荐档和配套投影器；否则仍勾选全部权重与投影器。
+        setSelected(new Set(defaultSelectedPaths(result.files, occupied)))
         return true
       } catch (err) {
         if (seq !== detailRequestSeq.current) return false
@@ -148,7 +179,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
       setRevisions(list)
       // 防御：若后端默认 revision 与本地约定不同，以返回值为准并重载。
       const fallback = defaultRevisionFor(repo.source)
-      if (list.defaultRevision && list.defaultRevision !== fallback) {
+      if (!pinRevision.current && list.defaultRevision && list.defaultRevision !== fallback) {
         setRevision(list.defaultRevision)
         void loadDetail(list.defaultRevision)
       }
@@ -162,8 +193,8 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
 
   useEffect(() => {
     void loadRevisions()
-    void loadDetail(defaultRevisionFor(repo.source))
-  }, [loadDetail, loadRevisions, repo.source])
+    void loadDetail(initialRevision?.trim() || defaultRevisionFor(repo.source))
+  }, [initialRevision, loadDetail, loadRevisions, repo.source])
 
   /** 切换 revision：重新拉取文件列表，清空已选文件并提示。 */
   const handleSelectRevision = (next: string) => {
@@ -260,13 +291,71 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
   }, [detail, fileQuery, kindFilter])
 
   const selection = useMemo(() => {
-    if (!detail) return { files: [] as RepoFile[], totalSize: 0 }
+    if (!detail) return { files: [] as RepoFile[], totalSize: 0, unknownSizeCount: 0 }
     const picked = detail.files.filter((file) => selected.has(file.path))
     return {
       files: picked,
       totalSize: picked.reduce((sum, file) => sum + file.size, 0),
+      unknownSizeCount: picked.filter((file) => file.size <= 0).length,
     }
   }, [detail, selected])
+
+  const occupied = useCallback(
+    (file: RepoFile) => Boolean(resolveState(file)?.disabled),
+    [resolveState],
+  )
+
+  const quantOptions = useMemo(() => (detail ? quantChoices(detail.files) : []), [detail])
+  const shardOptions = useMemo(
+    () => (detail ? shardChoices(detail.files).filter((group) => group.fileCount >= 2) : []),
+    [detail],
+  )
+
+  const applyPaths = useCallback(
+    (paths: string[], emptyMessage: string) => {
+      if (paths.length === 0) {
+        pushToast('info', emptyMessage)
+        return
+      }
+      setSelected(new Set(paths))
+    },
+    [pushToast],
+  )
+
+  useEffect(() => {
+    const target = saveDir.trim()
+    if (!target) {
+      setDisk(null)
+      setDiskNote('')
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void getDiskSpace(target)
+        .then((space) => {
+          if (cancelled) return
+          setDiskNote('')
+          setDisk(
+            assessDisk({
+              freeBytes: space.freeBytes,
+              volume: space.volume,
+              selectedBytes: selection.totalSize,
+              unknownSizeCount: selection.unknownSizeCount,
+              connectionsPerFile: settings?.connectionsPerFile ?? 4,
+            }),
+          )
+        })
+        .catch(() => {
+          if (cancelled) return
+          setDisk(null)
+          setDiskNote('无法读取磁盘剩余空间')
+        })
+    }, 250)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [saveDir, selection.totalSize, selection.unknownSizeCount, settings?.connectionsPerFile])
 
   const toggleFile = useCallback((path: string) => {
     setSelected((previous) => {
@@ -326,6 +415,10 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
 
   const handleStart = async () => {
     if (!detail || switchingRevision || detail.revision !== revision || selection.files.length === 0) return
+    if (disk?.level === 'short') {
+      pushToast('error', '磁盘空间不足', `${disk.volume} 还差 ${formatBytes(disk.shortfallBytes)}`)
+      return
+    }
     if (!saveDir.trim()) {
       pushToast('error', '请先选择下载目录')
       return
@@ -340,6 +433,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
         saveDir: saveDir.trim(),
         // v0.2.0：下载请求携带当前 revision（缺省时后端按来源默认值）。
         revision,
+        sha256: file.sha256,
       }))
       const created = await startDownloads(requests)
       upsertTasks(created)
@@ -459,6 +553,57 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                   清空选择
                 </Button>
               </div>
+              {quantOptions.length > 1 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-meta text-fg-muted">量化档</span>
+                  {quantOptions.map((option) => {
+                    const paths = detail
+                      ? pathsForQuant(detail.files, option.id, occupied)
+                      : []
+                    const active = samePathSet(selected, paths) && paths.length > 0
+                    return (
+                      <Button
+                        key={option.id}
+                        size="sm"
+                        variant={active ? 'secondary' : 'ghost'}
+                        aria-pressed={active}
+                        title={`只选择 ${option.id} 及配套投影器`}
+                        onClick={() =>
+                          applyPaths(paths, `${option.id} 的文件都已在队列或已下载`)
+                        }
+                      >
+                        {option.id}
+                        <span className="text-fg-muted">{formatBytes(option.bytes)}</span>
+                      </Button>
+                    )
+                  })}
+                  <span className="text-meta text-fg-secondary">
+                    默认只勾选推荐档和配套投影器
+                  </span>
+                </div>
+              ) : null}
+              {shardOptions.length > 0 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-meta text-fg-muted">分片组</span>
+                  {shardOptions.map((group) => {
+                    const paths = detail ? pathsForShard(detail.files, group.id, occupied) : []
+                    const active = samePathSet(selected, paths) && paths.length > 0
+                    return (
+                      <Button
+                        key={group.id}
+                        size="sm"
+                        variant={active ? 'secondary' : 'ghost'}
+                        aria-pressed={active}
+                        title={`选择 ${group.label} 的全部分片`}
+                        onClick={() => applyPaths(paths, `${group.label} 的分片都已在队列或已下载`)}
+                      >
+                        {group.label}
+                        <span className="text-fg-muted">{group.fileCount} 片</span>
+                      </Button>
+                    )
+                  })}
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -544,7 +689,29 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
               }
             />
 
-            <div data-action-shelf className={cx('selection-shelf flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
+            <div data-action-shelf className={cx('selection-shelf flex shrink-0 flex-col gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
+              {disk?.level === 'short' ? (
+                <p role="status" className="text-meta text-danger">
+                  {disk.volume} 可用 {formatBytes(disk.freeBytes)}，已选 {formatBytes(disk.neededBytes)}，还差{' '}
+                  {formatBytes(disk.shortfallBytes)}。空间不足，无法开始下载。
+                </p>
+              ) : null}
+              {disk?.level === 'low' ? (
+                <p role="status" className="text-meta text-amber-700 dark:text-amber-300">
+                  {disk.volume} 预分配后剩余 {formatBytes(disk.remainingBytes)}，低于 1 GB 安全余量。分段下载会先占用所选文件的完整体积。
+                </p>
+              ) : null}
+              {diskNote ? (
+                <p role="status" className="text-meta text-fg-muted">
+                  {diskNote}
+                </p>
+              ) : null}
+              {disk && disk.unknownSizeCount > 0 ? (
+                <p className="text-meta text-fg-muted">
+                  有 {disk.unknownSizeCount} 个文件大小未知，未计入磁盘预检。
+                </p>
+              ) : null}
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <FolderOpen className="h-4 w-4 shrink-0 text-fg-muted" aria-hidden="true" />
                 <span className="shrink-0 text-meta text-fg-secondary">保存到</span>
@@ -573,7 +740,12 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                 </span>
                 <Button
                   variant="primary"
-                  disabled={switchingRevision || detail.revision !== revision || selection.files.length === 0}
+                  disabled={
+                    switchingRevision ||
+                    detail.revision !== revision ||
+                    selection.files.length === 0 ||
+                    disk?.level === 'short'
+                  }
                   loading={starting}
                   onClick={() => void handleStart()}
                   leftIcon={<Download className="h-4 w-4" />}
@@ -581,6 +753,7 @@ export function RepoDetailView({ repo, onBack }: RepoDetailViewProps) {
                   开始下载
                   {selection.files.length > 0 ? ` (${selection.files.length})` : ''}
                 </Button>
+              </div>
               </div>
             </div>
           </div>

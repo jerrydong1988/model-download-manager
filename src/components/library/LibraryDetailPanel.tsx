@@ -12,7 +12,8 @@ import {
 import type { LibraryFileEntry } from '../../lib/libraryTree'
 import { formatBytes, formatDateTime, formatRelativeTime } from '../../lib/format'
 import { useAppStore } from '../../store/appStore'
-import { FileKindBadge, SourceBadge } from '../ui/Badge'
+import { verifyPresentation } from '../../lib/verifyLabel'
+import { Badge, FileKindBadge, SourceBadge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { PathText } from '../ui/PathText'
 import { cx } from '../../lib/cx'
@@ -75,6 +76,8 @@ export function LibraryDetailPanel({
   const FileIcon = visual.icon
   const closeRef = useRef<HTMLButtonElement>(null)
   const pushToast = useAppStore((state) => state.pushToast)
+  const tasks = useAppStore((state) => state.tasks)
+  const verify = verifyPresentation(file.path, tasks)
 
   useEffect(() => {
     // 打开时焦点移入面板（关闭后由 LibraryPage 归还到原行）。
@@ -118,6 +121,9 @@ export function LibraryDetailPanel({
         </div>
 
         <dl className="mt-4 space-y-3 border-t border-line pt-4">
+          <InfoRow label="校验">
+            <Badge tone={verify.tone}>{verify.label}</Badge>
+          </InfoRow>
           <InfoRow label="大小">{formatBytes(file.size)}</InfoRow>
           <InfoRow label="修改时间">
             {formatDateTime(file.modifiedAt)}

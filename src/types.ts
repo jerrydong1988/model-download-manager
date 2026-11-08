@@ -20,6 +20,9 @@ export type TaskStatus =
   | 'error'
   | 'cancelled'
 
+/** 下载完成后的内容校验。旧任务缺省为无校验和。 */
+export type VerifyStatus = 'unavailable' | 'pending' | 'verified' | 'mismatch'
+
 /** 应用设置（命令 13-14 / 事件 settings-updated） */
 export interface Settings {
   /** 绝对路径；默认 %USERPROFILE%\Documents\Models */
@@ -87,6 +90,8 @@ export interface RepoFile {
   size: number
   /** 后端按扩展名分类 */
   kind: FileKind
+  /** 内容 sha256（小写十六进制）；没有远端校验和时省略 */
+  sha256?: string
 }
 
 /** 仓库详情（命令 3） */
@@ -137,6 +142,10 @@ export interface DownloadTask {
   /** 断点续传校验 */
   etag?: string
   lastModified?: string
+  /** 期望的内容 sha256 */
+  sha256?: string
+  /** 完成后的校验结果；缺省表示无校验和 */
+  verifyStatus?: VerifyStatus
 }
 
 /** 下载请求（命令 4） */
@@ -150,6 +159,17 @@ export interface DownloadRequest {
   saveDir: string
   /** v0.2.0：可空；缺省用来源默认 revision（HF main / MS master） */
   revision?: string
+  /** 仓库列表中的 sha256；没有则省略 */
+  sha256?: string
+}
+
+/** 目标目录所在卷的可用空间（命令 22） */
+export interface DiskSpace {
+  /** 调用方可使用的字节 */
+  freeBytes: number
+  totalBytes: number
+  /** 盘符或 UNC 共享，如 `D:` */
+  volume: string
 }
 
 /** 本地模型库文件（命令 15） */

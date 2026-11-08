@@ -521,6 +521,8 @@ mod tests {
             completed_at: None,
             etag: None,
             last_modified: None,
+            sha256: None,
+            verify_status: crate::models::VerifyStatus::Unavailable,
         }
     }
 

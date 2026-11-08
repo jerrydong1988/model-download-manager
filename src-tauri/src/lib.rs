@@ -5,6 +5,7 @@
 //! 链接 tray/menu 代码会导入 comctl32 v6 专有导出导致 loader 失败（STATUS_ENTRYPOINT_NOT_FOUND）。
 
 pub mod download;
+pub mod integrity;
 pub mod library;
 pub mod models;
 pub mod notifications;

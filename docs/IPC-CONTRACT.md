@@ -100,6 +100,7 @@ interface RepoFile {
   name: string               // 文件名（path 的最后一段）
   size: number               // 字节；未知为 0
   kind: FileKind             // 后端按扩展名分类
+  sha256?: string            // 内容 sha256，小写十六进制；HF 取 LFS oid，ModelScope 取 Sha256
 }
 
 interface RepoDetail {
@@ -158,6 +159,8 @@ interface DownloadTask {
   completedAt?: number
   etag?: string              // 断点续传校验
   lastModified?: string
+  sha256?: string            // 期望的内容 sha256；没有远端校验和时省略
+  verifyStatus?: 'unavailable' | 'pending' | 'verified' | 'mismatch'
 }
 ```
 
@@ -172,6 +175,7 @@ interface DownloadRequest {
   saveDir: string            // 本次下载的根目录（Settings.downloadDir 或用户临时指定）
   /** v0.2.0：可空；缺省用来源默认 revision（HF main / MS master） */
   revision?: string
+  sha256?: string            // 仓库列表中的 sha256
 }
 ```
 
@@ -229,6 +233,7 @@ interface AppSnapshot {
 | 19 | `get_default_download_dir` | — | `string` | |
 | 20 | `open_data_dir` | — | `()` | 打开应用数据目录 |
 | 21 | `list_revisions` | `{ source, repoId }` | `RevisionList` | v0.2.0：仓库可下载 revision 列表（HF refs；ModelScope 尽力） |
+| 22 | `disk_space` | `{ path }` | `DiskSpace` | 读取 `path` 所在卷的可用空间。目录不存在时向父级回退。`DiskSpace = { freeBytes, totalBytes, volume }` |
 
 ### RevisionList
 

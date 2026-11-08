@@ -33,6 +33,7 @@ import {
 } from '../lib/ipc'
 import { SOURCE_LABEL } from '../lib/labels'
 import { normalizeDownloadDir } from '../lib/downloadPaths'
+import { persistThemeSetting } from '../lib/persistTheme'
 import { applyThemeSetting } from '../lib/theme'
 import { useAppStore } from '../store/appStore'
 import { APP_REFRESH_PAGE_EVENT } from '../components/layout/useGlobalShortcuts'
@@ -270,14 +271,21 @@ export default function SettingsPage() {
   const [testResults, setTestResults] =
     useState<Record<Source, TestResult>>(EMPTY_TEST_RESULTS)
   const summaryRef = useRef<HTMLDivElement>(null)
-  /** 主题自动保存串行链：避免连续切换时并发 save_settings 相互覆盖。 */
-  const themeSaveChain = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
     if (draft || !settings) return
     setDraft({ ...settings })
     setBandwidthInput(String(bytesToMb(settings.bandwidthLimit)))
   }, [draft, settings])
+
+  // 顶栏一键切换写入已保存主题后，设置页分段控件跟着更新，其它未保存草稿保留。
+  useEffect(() => {
+    if (!settings) return
+    setDraft((previous) => {
+      if (!previous || previous.theme === settings.theme) return previous
+      return { ...previous, theme: settings.theme }
+    })
+  }, [settings])
 
   // v0.2.0：扫描根在「本地模型库」页管理；外部修改（增删根）后同步草稿，
   // 避免保存设置时用旧 libraryRoots 覆盖。
@@ -340,26 +348,12 @@ export default function SettingsPage() {
     })
   }
 
-  /** 主题三选一：立即应用（预览）并单独保存主题，不提交其他未保存草稿。 */
+  /** 主题三选一：立即应用并单独保存主题，不提交其他未保存草稿。 */
   const handleThemeChange = (value: ThemeSetting) => {
     update('theme', value)
-    applyThemeSetting(value)
-    if (!settings || settings.theme === value) return
-    themeSaveChain.current = themeSaveChain.current.then(async () => {
-      const current = useAppStore.getState().settings
-      if (!current || current.theme === value) return
-      try {
-        const saved = await saveSettingsCommand({ ...current, theme: value })
-        useAppStore.getState().setSettings(saved)
-        setDraft((previous) => (previous ? { ...previous, theme: saved.theme } : previous))
-        useAppStore.getState().pushToast('success', '外观主题已保存', '主题更改已立即应用。')
-      } catch (err) {
-        useAppStore.getState().pushToast('error', '保存主题失败', toErrorText(err))
-        // 回滚到已保存主题，避免界面与设置不一致。
-        const fallback = useAppStore.getState().settings?.theme ?? 'system'
-        applyThemeSetting(fallback)
-        setDraft((previous) => (previous ? { ...previous, theme: fallback } : previous))
-      }
+    void persistThemeSetting(value, { announce: true }).catch(() => {
+      const fallback = useAppStore.getState().settings?.theme ?? 'system'
+      setDraft((previous) => (previous ? { ...previous, theme: fallback } : previous))
     })
   }
 
@@ -531,7 +525,7 @@ export default function SettingsPage() {
                 <div className="min-w-0">
                   <p className="text-body font-medium text-fg">主题</p>
                   <p className="mt-0.5 text-meta leading-4 text-fg-secondary">
-                    选择浅色、深色或跟随系统外观；更改立即应用。
+                    选择浅色、深色或跟随系统外观，也可在页面右上角一键切换。更改立即应用。
                   </p>
                 </div>
                 <SegmentedControlWrapper

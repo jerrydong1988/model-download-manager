@@ -16,6 +16,7 @@ import type {
 import * as ipc from '../lib/ipc'
 import { toErrorText } from '../lib/ipc'
 import { defaultRevisionFor, formatBytes } from '../lib/format'
+import { getPendingTheme } from '../lib/themeIntent'
 
 export type PageKey = 'browse' | 'downloads' | 'library' | 'settings'
 export type ToastKind = 'success' | 'error' | 'info'
@@ -451,8 +452,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSettings: (settings) => {
-    if (snapshotJournal) snapshotSettings = settings
-    set({ settings: withSettingsDefaults(settings) })
+    const pending = getPendingTheme()
+    const next =
+      pending && settings.theme !== pending ? { ...settings, theme: pending } : settings
+    if (snapshotJournal) snapshotSettings = next
+    set({ settings: withSettingsDefaults(next) })
   },
 
   pushToast: (kind, title, description, action) => {

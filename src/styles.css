@@ -7,47 +7,47 @@
  * <html data-theme="light|dark"> 由 index.html 首帧脚本 + src/lib/theme.ts 维护。
  */
 :root {
-  --color-bg: 245 245 247;
-  --color-surface: 255 255 255; /* #FFFFFF */
-  --color-surface-2: 245 245 247;
-  --color-surface-3: 232 232 237;
-  --color-border: 228 228 233;
-  --color-border-strong: 127 127 137;
-  --color-fg: 32 33 36;
-  --color-fg-secondary: 82 82 93;
-  --color-fg-muted: 105 105 114;
+  --color-bg: 249 250 251;
+  --color-surface: 255 255 255;
+  --color-surface-2: 247 247 247;
+  --color-surface-3: 238 238 238;
+  --color-border: 222 229 238;
+  --color-border-strong: 100 116 139;
+  --color-fg: 34 30 31;
+  --color-fg-secondary: 48 48 48;
+  --color-fg-muted: 111 111 111;
   --color-fg-disabled: 158 158 168;
-  --color-primary: 89 86 166;
-  --color-primary-hover: 72 69 144;
-  --color-primary-soft: 239 238 250;
+  --color-primary: 8 106 74;
+  --color-primary-hover: 6 90 62;
+  --color-primary-soft: 236 253 245;
   --color-on-primary: 255 255 255;
-  --color-danger: 220 38 38; /* #DC2626 */
-  --color-danger-strong: 185 28 28; /* #B91C1C */
-  --color-success: 4 120 87; /* #047857 */
-  --color-warning: 180 83 9; /* #B45309 */
-  --color-ring: 89 86 166;
+  --color-danger: 176 26 46;
+  --color-danger-strong: 153 20 38;
+  --color-success: 8 106 74;
+  --color-warning: 138 90 0;
+  --color-ring: 64 93 230;
   color-scheme: light;
 }
 
 [data-theme='dark'] {
-  --color-bg: 27 27 31;
-  --color-surface: 34 34 39;
-  --color-surface-2: 43 43 49;
-  --color-surface-3: 57 57 65;
-  --color-border: 64 64 73;
-  --color-border-strong: 143 143 155;
-  --color-fg: 242 242 245;
-  --color-fg-secondary: 203 203 212;
-  --color-fg-muted: 169 169 182;
-  --color-fg-disabled: 115 115 129;
-  --color-primary: 185 182 246;
-  --color-primary-hover: 203 200 255;
-  --color-primary-soft: 52 49 78;
-  --color-on-primary: 36 35 43;
-  --color-danger: 248 113 113; /* #F87171 */
-  --color-success: 52 211 153; /* #34D399 */
-  --color-warning: 251 191 36; /* #FBBF24 */
-  --color-ring: 185 182 246;
+  --color-bg: 14 17 19;
+  --color-surface: 22 26 29;
+  --color-surface-2: 29 34 38;
+  --color-surface-3: 42 48 54;
+  --color-border: 42 48 54;
+  --color-border-strong: 168 176 184;
+  --color-fg: 238 241 243;
+  --color-fg-secondary: 199 205 211;
+  --color-fg-muted: 174 182 190;
+  --color-fg-disabled: 120 128 136;
+  --color-primary: 74 222 128;
+  --color-primary-hover: 52 211 153;
+  --color-primary-soft: 22 58 48;
+  --color-on-primary: 5 38 27;
+  --color-danger: 255 138 152;
+  --color-success: 74 222 128;
+  --color-warning: 248 201 106;
+  --color-ring: 123 147 255;
   color-scheme: dark;
 }
 

@@ -29,11 +29,11 @@ Tauri 2 包装的 React/TypeScript 界面；Windows 优先。默认窗口 1320×
 
 ## Brand Commitments
 
-产品名称保持“模型下载管理器 / Model Download Manager”，中文操作文案。用户要求替换旧视觉，认为旧界面不够美观现代。用户拒绝矿物绿底色，希望采用雾白图录式中性配色和类似 Apple 的克制、精致设计，并在方向选择页补充轻毛玻璃偏好；保留信息图谱的任务导向布局，采用雾白、石墨、少量蓝紫强调色。轻半透明用于导航与浮层。
+产品名称保持“模型下载管理器 / Model Download Manager”，中文操作文案。v0.4.2 确认的视觉是浅灰窗口、白色工作面和深薄荷绿强调，焦点环为靛蓝；布局仍是原来的四页目录。轻半透明只用于导航与浮层。已否决整页矿物绿、雾白图录的蓝紫主色，以及换成另一种产品的页面结构。
 
 ## Evidence on Hand
 
-README.md、docs/IPC-CONTRACT.md、现有源代码和 docs/screenshots 中的浅/深色截图。截图对应旧视觉，需与当前组件/令牌核对。Mock 数据为演示数据，不得当成用户模型库或真实下载结果。
+README.md、docs/IPC-CONTRACT.md、现有源代码和 DESIGN.md。docs/screenshots 采集于 v0.4.2 配色更新之前，只说明布局。Mock 数据为演示数据，不得当成用户模型库或真实下载结果。
 
 ## Product Principles
 

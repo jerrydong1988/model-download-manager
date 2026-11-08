@@ -1,15 +1,71 @@
 {
-  "capturedOn": "2026-11-04",
+  "capturedAt": "2026-11-08T07:58:46.557Z",
   "source": "Model Download Manager browser preview with ?mock=1",
-  "data": "Synthetic repository, download and library fixtures; no personal files or credentials",
-  "implementationCommit": "8f95edc559887c6c1298f86afeb600111740fbb5",
+  "data": "Synthetic fixtures; no personal files or credentials",
+  "implementationCommit": "6f30b19fd902b2b25fa4c25d0c0ea21625330837",
   "images": [
-    { "file": "ui-browse.jpg", "viewport": [1440, 900], "state": "Browse, light" },
-    { "file": "ui-downloads.jpg", "viewport": [1440, 900], "state": "Download queue, light" },
-    { "file": "ui-library.jpg", "viewport": [1440, 900], "state": "Local library, light" },
-    { "file": "ui-settings.jpg", "viewport": [1440, 900], "state": "Settings, light" },
-    { "file": "ui-files.jpg", "viewport": [1440, 900], "state": "Repository files with selection, light" },
-    { "file": "ui-dark.jpg", "viewport": [1440, 900], "state": "Browse, dark" },
-    { "file": "ui-revision.jpg", "viewport": [1040, 680], "state": "Revision selector, light" }
+    {
+      "file": "ui-browse.jpg",
+      "bytes": 81002,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-downloads.jpg",
+      "bytes": 93178,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-library.jpg",
+      "bytes": 89366,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-settings.jpg",
+      "bytes": 84741,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-files.jpg",
+      "bytes": 72384,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-revision.jpg",
+      "bytes": 74046,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    },
+    {
+      "file": "ui-dark.jpg",
+      "bytes": 80392,
+      "mock": true,
+      "viewport": [
+        1440,
+        900
+      ]
+    }
   ]
 }

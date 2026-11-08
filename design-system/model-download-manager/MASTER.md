@@ -1,6 +1,6 @@
 # Historical Design System Reference
 
-> **已取代 / Superseded — 2026-11-04。** 当前规范为 [根目录 DESIGN.md](../../DESIGN.md) 和 [机器扩展](../../.impeccable/design.json)。以下保留本次重设计之前的生成参考，仅用于追溯；其中蓝/琥珀主色、Poppins/Open Sans、组件样例、动效和优先级说明均不再约束当前实现。不要据此覆盖雾白、石墨、蓝紫与轻玻璃设计。
+> **已取代 / Superseded — 2026-11-08。** 当前规范为 [根目录 DESIGN.md](../../DESIGN.md) 和 [机器扩展](../../.impeccable/design.json)，即 v0.4.2 的浅灰目录与深薄荷绿。以下只供追溯；其中的蓝/琥珀主色，以及后来的雾白蓝紫，都不再约束当前实现。
 
 > **LOGIC:** When building a specific page, first check `design-system/pages/[page-name].md`.
 > If that file exists, its rules **override** this Master file.

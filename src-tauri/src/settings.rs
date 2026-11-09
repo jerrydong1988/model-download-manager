@@ -210,7 +210,11 @@ pub fn normalize_update_endpoint(raw: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Ok(String::new());
     }
-    normalize_endpoint(trimmed, "更新源")
+    let endpoint = normalize_endpoint(trimmed, "更新源")?;
+    if !endpoint.to_ascii_lowercase().starts_with("https://") {
+        return Err("更新源必须使用 HTTPS".into());
+    }
+    Ok(endpoint)
 }
 
 /// 端点规范化：去空格、去尾部 `/`、必须 http(s) 且 host 非空。
@@ -419,6 +423,7 @@ mod tests {
             "https://mirror.example.com/latest.json"
         );
         assert!(normalize_update_endpoint("ftp://x").is_err());
+        assert!(normalize_update_endpoint("http://mirror.example.com/latest.json").is_err());
         assert!(normalize_update_endpoint("not a url").is_err());
 
         // 非法更新源：validate 报错，sanitize 静默回退空。

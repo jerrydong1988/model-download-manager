@@ -61,6 +61,23 @@ test('a single weight set still selects every weight and projector', () => {
   ])
 })
 
+test('quant folders isolate generic shards and projectors; explicit filename wins', () => {
+  const files = [
+    file('Q4_K_M/weights/model-00001-of-00002.gguf', 'weight'),
+    file('Q4_K_M/weights/model-00002-of-00002.gguf', 'weight'),
+    file('Q4_K_M/mmproj.gguf', 'mmproj'),
+    file('Q8_0/weights/model-00001-of-00002.gguf', 'weight'),
+    file('Q8_0/weights/model-00002-of-00002.gguf', 'weight'),
+    file('Q8_0/mmproj.gguf', 'mmproj'),
+    file('Q4_K_M/model-Q8_0.gguf', 'weight'),
+  ]
+  assert.deepEqual(quantChoices(files).map(({ id, fileCount }) => [id, fileCount]), [
+    ['Q4_K_M', 2], ['Q8_0', 3],
+  ])
+  assert.deepEqual(defaultSelectedPaths(files), files.slice(0, 3).map(f => f.path))
+  assert.deepEqual(pathsForQuant(files, 'Q8_0').sort(), files.slice(3).map(f => f.path).sort())
+})
+
 test('quant shards stay together inside the chosen quant', () => {
   const files = [
     file('model-Q4_K_M-00001-of-00002.gguf', 'weight', 4),

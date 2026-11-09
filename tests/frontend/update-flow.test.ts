@@ -10,10 +10,18 @@ import {
   statusCheckFailed,
   statusInstalled,
   updateProgressPercent,
+  validUpdateEndpoint,
 } from '../../src/lib/updateFlow.ts'
 import type { UpdateInfo } from '../../src/types.ts'
 
 const info: UpdateInfo = { version: '0.5.0', notes: '更新说明' }
+
+test('custom update feeds must use HTTPS in release builds', () => {
+  assert.ok(validUpdateEndpoint(''))
+  assert.ok(validUpdateEndpoint(' HTTPS://mirror.example.com/latest.json '))
+  assert.ok(!validUpdateEndpoint('http://mirror.example.com/latest.json'))
+  assert.ok(!validUpdateEndpoint('https://'))
+})
 
 test('statusAfterCheck：有新版 → available；无新版手动 upToDate / 自动 idle', () => {
   const available = statusAfterCheck(true, info)

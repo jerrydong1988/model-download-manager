@@ -10,7 +10,7 @@
  * 输出：release-assets/latest.json，url 指向发布时重命名后的 setup.exe 资产名。
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,10 +21,11 @@ const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
 const version = pkg.version
 const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis')
 
-const sigFile = existsSync(bundleDir)
-  ? readdirSync(bundleDir).find((name) => name.endsWith('_x64-setup.exe.sig'))
-  : undefined
-if (!sigFile) {
+const config = JSON.parse(readFileSync(path.join(root, 'src-tauri/tauri.conf.json'), 'utf8'))
+const sigFile = path.join(bundleDir, `${config.productName}_${version}_x64-setup.exe.sig`)
+const releaseTag = process.env.GITHUB_REF_TYPE === 'tag'
+if (!existsSync(sigFile)) {
+  if (releaseTag) throw new Error(`正式发布缺少安装包签名：${sigFile}`)
   console.log('未找到 updater 签名产物（.sig），跳过 latest.json 生成（无签名密钥时属正常）。')
   process.exit(0)
 }
@@ -33,8 +34,10 @@ const repo = process.env.GITHUB_REPOSITORY
 if (!repo || !repo.includes('/')) {
   throw new Error('缺少环境变量 GITHUB_REPOSITORY（owner/repo），无法生成 latest.json')
 }
-const tag = process.env.GITHUB_REF_NAME || `v${version}`
-const signature = readFileSync(path.join(bundleDir, sigFile), 'utf8').trim()
+const tag = `v${version}`
+if (releaseTag && process.env.GITHUB_REF_NAME !== tag) throw new Error('发布标签与应用版本不一致')
+const signature = readFileSync(sigFile, 'utf8').trim()
+if (!signature) throw new Error('安装包签名为空')
 // 与 ci.yml 发布资产命名保持一致（setup.exe 重命名后的名字）。
 const setupName = `Model-Download-Manager_${version}_x64-setup.exe`
 const notes = readFileSync(path.join(root, 'docs', 'RELEASE-NOTES.md'), 'utf8')

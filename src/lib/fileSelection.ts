@@ -51,6 +51,18 @@ export function quantOf(name: string): string | null {
   return last ? last.toUpperCase() : null
 }
 
+/** 文件名优先；通用分片名沿路径从最近一层目录寻找量化档。 */
+function fileQuant(file: RepoFile): string | null {
+  const named = quantOf(file.name)
+  if (named) return named
+  const directories = file.path.split(/[\\/]/).slice(0, -1)
+  for (const directory of directories.reverse()) {
+    const quant = quantOf(directory)
+    if (quant) return quant
+  }
+  return null
+}
+
 /** `model-00001-of-00004.safetensors` → 同一组分片。总数小于 2 的不视为分片。 */
 export function shardOf(path: string): { groupId: string; label: string; index: number; total: number } | null {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
@@ -77,7 +89,7 @@ function weightQuants(files: RepoFile[]): string[] {
   const ids = new Set<string>()
   for (const file of files) {
     if (file.kind !== 'weight') continue
-    const quant = quantOf(file.name)
+    const quant = fileQuant(file)
     if (quant) ids.add(quant)
   }
   return [...ids]
@@ -94,7 +106,7 @@ function quantRank(id: string): number {
 export function quantChoices(files: RepoFile[]): QuantChoice[] {
   const ids = weightQuants(files).sort((a, b) => quantRank(a) - quantRank(b) || a.localeCompare(b))
   return ids.map((id) => {
-    const matched = files.filter((file) => file.kind === 'weight' && quantOf(file.name) === id)
+    const matched = files.filter((file) => file.kind === 'weight' && fileQuant(file) === id)
     return {
       id,
       bytes: matched.reduce((sum, file) => sum + file.size, 0),
@@ -133,15 +145,15 @@ function companionMmproj(files: RepoFile[], quant: string | null): RepoFile[] {
   const projectors = files.filter((file) => file.kind === 'mmproj')
   if (projectors.length === 0) return []
   if (quant) {
-    const same = projectors.filter((file) => quantOf(file.name) === quant)
+    const same = projectors.filter((file) => fileQuant(file) === quant)
     if (same.length > 0) return same
   }
   const generic = projectors.filter((file) => {
-    const id = quantOf(file.name)
+    const id = fileQuant(file)
     return id == null || id === 'F16' || id === 'BF16' || id === 'FP16'
   })
   if (generic.length > 0) return generic
-  const distinct = new Set(projectors.map((file) => quantOf(file.name) ?? ''))
+  const distinct = new Set(projectors.map((file) => fileQuant(file) ?? ''))
   if (distinct.size === 1) return projectors
   return []
 }
@@ -164,7 +176,7 @@ export function pathsForQuant(
   occupied: (file: RepoFile) => boolean = () => false,
 ): string[] {
   const weights = files.filter(
-    (file) => file.kind === 'weight' && quantOf(file.name) === quantId && !occupied(file),
+    (file) => file.kind === 'weight' && fileQuant(file) === quantId && !occupied(file),
   )
   const projectors = companionMmproj(files, quantId).filter((file) => !occupied(file))
   return uniquePaths([...weights, ...projectors])
@@ -183,7 +195,7 @@ export function pathsForShard(
 
 function pickQuant(files: RepoFile[], occupied: (file: RepoFile) => boolean): string | null {
   const available = quantChoices(files).filter((choice) =>
-    files.some((file) => file.kind === 'weight' && quantOf(file.name) === choice.id && !occupied(file)),
+    files.some((file) => file.kind === 'weight' && fileQuant(file) === choice.id && !occupied(file)),
   )
   return available[0]?.id ?? null
 }

@@ -109,6 +109,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     settings: RwLock<Settings>,
     tasks: Mutex<Vec<DownloadTask>>,
+    persist_lock: Mutex<()>,
     controls: Mutex<HashMap<String, Arc<TaskControl>>>,
     client: RwLock<reqwest::Client>,
     /// 全局字节级限速器（设置变更立即生效）。
@@ -140,6 +141,7 @@ impl AppState {
             data_dir,
             settings: RwLock::new(settings),
             tasks: Mutex::new(Vec::new()),
+            persist_lock: Mutex::new(()),
             controls: Mutex::new(HashMap::new()),
             client: RwLock::new(client),
             limiter,
@@ -434,15 +436,21 @@ impl AppState {
 
     /// 落盘 tasks.json（原子写）。
     pub fn persist_tasks(&self) -> Result<(), String> {
-        let tasks = self.tasks_snapshot();
-        util::atomic_write_json(&self.tasks_path(), &PersistedTasks::new(tasks))?;
+        // The updater and scheduler can both save. Serialize snapshot + write so an
+        // older snapshot cannot replace a newer one during shutdown.
+        let _write = self.persist_lock.lock().unwrap_or_else(|err| err.into_inner());
         self.dirty.store(false, Ordering::SeqCst);
-        Ok(())
+        let tasks = self.tasks_snapshot();
+        let result = util::atomic_write_json(&self.tasks_path(), &PersistedTasks::new(tasks));
+        if result.is_err() {
+            self.dirty.store(true, Ordering::SeqCst);
+        }
+        result
     }
 
     /// 启动恢复：载入 tasks.json 并应用恢复规则。
     ///
-    /// - `active` / `pausing` → `paused`；
+    /// - `active` 按 autoResume 排队或暂停；`pausing` 始终暂停；
     /// - `queued` 在 `autoResume == false` 时 → `paused`；
     /// - 终态与已暂停任务保持不变；速度清零。
     pub fn load_persisted_tasks(&self) -> Vec<DownloadTask> {
@@ -472,6 +480,9 @@ impl AppState {
             task.update_seq = 0;
             task.speed = 0;
             match task.status {
+                crate::models::TaskStatus::Active if auto_resume => {
+                    task.status = crate::models::TaskStatus::Queued;
+                }
                 crate::models::TaskStatus::Active | crate::models::TaskStatus::Pausing => {
                     task.status = crate::models::TaskStatus::Paused;
                 }

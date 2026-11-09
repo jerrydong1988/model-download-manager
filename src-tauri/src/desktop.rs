@@ -43,8 +43,6 @@ pub fn run() {
             let settings = settings::load(&data_dir);
             let state = Arc::new(state::AppState::new(settings, data_dir));
 
-            // 启动恢复：active/pausing → paused；autoResume=false 时 queued → paused。
-            queue::recover(&state)?;
             let report_state = state.clone();
             let app_handle = app.handle().clone();
             state.set_verify_report(Arc::new(move |task, notify_success| {
@@ -68,6 +66,7 @@ pub fn run() {
                     crate::notifications::notify_body(&app_handle, &body);
                 }
             }));
+            queue::recover(&state)?;
             app.manage(state.clone());
 
             // v0.5.0：在线升级。待装更新缓存独立管理；autoCheckUpdates 默认开，

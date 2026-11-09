@@ -48,7 +48,7 @@ v0.4.2 将界面改为浅灰与薄荷绿，并在每个页面右上角一键切�
 - **外观**：浅色 / 深色 / 跟随系统三选一，重启保持、首帧不闪白（v0.1.3）。v0.4.2 起，每个页面右上角可一键在浅色与深色之间切换并立即保存；当前若是「跟随系统」，点一下会改成与当时外观相反的固定主题，要恢复跟随系统需回到「设置 → 外观」。界面为浅灰窗口、白色工作区和深薄荷绿强调，焦点环为靛蓝。内置 Noto Sans SC 可变字体（离线可用）
 - **交互与无障碍（v0.1.3）**：全局快捷键、Skip link、完整键盘导航、可见焦点环、≥12px 字号与 AA 对比度、状态播报、错误摘要；`Ctrl+1..4` 切页、`Ctrl+F` 搜索、`F5` 刷新本页、`Ctrl+,` 设置、`?` 快捷键帮助
 - **打开仓库**：搜索框接受仓库 ID，也可粘贴 HuggingFace 与 ModelScope 的仓库页、blob 和 resolve 链接；链接指向单个文件时会预选该文件（v0.4.0）
-- **下载前检查与完成后校验（v0.4.0）**：目标盘放不下已选文件时不能开始下载；分段预分配后剩余空间低于 1 GB 时给出提示，仍允许继续。完成后保留 HuggingFace LFS oid 和 ModelScope 的 Sha256，在后台核对，不一致则标为失败并删除损坏文件
+- **下载前检查与完成后校验（v0.4.0）**：目标盘放不下已选文件时不能开始下载；分段预分配后剩余空间低于 1 GB 时给出提示，仍允许继续。完成后保留 HuggingFace LFS oid 和 ModelScope 的 Sha256，在后台核对，不一致则标为失败并原地保留文件，移走冲突文件后可重试
 - **最近打开与收藏（v0.4.0）**：只保存在本机，显示在浏览页，不需要账号
 - **网络适配**：默认使用 HuggingFace 镜像 `hf-mirror.com`（国内可用），可切回官方；支持 HTTP/SOCKS 代理；可选平台 Token（gated / 私有仓库）
 - **应用内在线升级（v0.5.0）**：启动自动检查新版本（可在设置关闭），发现新版弹提示；设置页「关于与更新」手动检查、查看更新说明、一键下载安装并自动重启。更新包经 minisign 数字签名校验；更新源可指向镜像 `latest.json`（国内网络友好）。仅 NSIS 安装版支持，免安装版仍需手动替换
@@ -90,10 +90,10 @@ cd src-tauri; cargo test # 后端单元 + 本地 HTTP 集成回归（CI 运行�
 ```powershell
 npm run tauri:build
 # 免安装可执行文件：src-tauri\target\release\model-download-manager.exe
-# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.0_x64-setup.exe
+# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.1_x64-setup.exe
 ```
 
-启用 updater 签名产物（v0.5.0）需先配置 minisign 私钥环境变量；未设置时构建自动跳过签名产物与 `latest.json`（更新检查仍可编译运行，只是发布时无更新可用）：
+正式发布须配置 minisign 签名密钥。CI 会验证安装包签名、版本和 `latest.json`，检查通过才发布。开发分支可构建无签名测试包。
 
 ```powershell
 $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content "$HOME\.tauri\mdm-updater.key" -Raw)
@@ -188,7 +188,7 @@ v0.4.0 与 v0.4.2 的安装包由 GitHub Actions 在 Windows 上完成测试、�
 ### v0.4.0
 
 - 多档量化默认只选推荐的一档和配套投影器，并可按分片组选择；搜索框可粘贴 HuggingFace / ModelScope 链接。
-- 开始下载前检查目标盘剩余空间；下载完成后后台校验 sha256，不一致则标为失败并删除损坏文件。
+- 开始下载前检查目标盘剩余空间；下载完成后后台校验 sha256，不一致则标为失败并原地保留文件，移走冲突文件后可重试。
 - 下载队列按仓库聚合，整批结束只发一条通知。本地库记住展开与筛选，标出重复、revision 和可更新文件，并可清理残留 `.part`。
 - 本机保存最近打开的仓库和收藏。旧配置、任务和下载路径无需迁移。
 

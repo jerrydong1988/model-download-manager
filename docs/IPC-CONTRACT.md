@@ -235,7 +235,7 @@ interface AppSnapshot {
 | 20 | `open_data_dir` | — | `()` | 打开应用数据目录 |
 | 21 | `list_revisions` | `{ source, repoId }` | `RevisionList` | v0.2.0：仓库可下载 revision 列表（HF refs；ModelScope 尽力） |
 | 22 | `disk_space` | `{ path }` | `DiskSpace` | 读取 `path` 所在卷的可用空间。目录不存在时向父级回退。`DiskSpace = { freeBytes, totalBytes, volume }` |
-| 23 | `check_update` | — | `UpdateInfo \| null` | v0.5.0：检查更新（有缓存待装时覆盖）。`null` = 已是最新；设置 `updateEndpoint` 非空时覆盖内置端点。检查到新版同时缓存，供 `install_update` 使用 |
+| 23 | `check_update` | — | `UpdateInfo \| null` | v0.5.0：检查更新（有缓存待装时覆盖）。`null` = 已是最新；设置 `updateEndpoint` 为 HTTPS 地址时覆盖内置端点。检查到新版同时缓存，供 `install_update` 使用 |
 | 24 | `install_update` | — | `()` | v0.5.0：下载并安装已缓存的新版本；进度经 `update-progress` 事件上报，完成后发 `update-installed`。重启由前端 process 插件 `relaunch()` 完成（capabilities 已含 `process:allow-restart`）。Windows 安装程序可能直接接管退出旧进程，此时命令响应可能丢失，属正常 |
 
 ### UpdateInfo（v0.5.0）
@@ -328,7 +328,7 @@ interface RevisionList {
 
 ### 5.5 启动恢复
 
-- 启动时读 `tasks.json`：`active/pausing` → `paused`；`queued` 保持 `queued`；若 `settings.autoResume == false` 则全部 `paused`。
+- 启动时读 `tasks.json`：开启自动继续时，`active` 和 `queued` 恢复为 `queued`，关闭时均恢复为 `paused`。`pausing` 和 `paused` 保持暂停。已完成但待校验的文件会重新校验，校验不一致时原文件保留。
 - 下载器在 `setup` 中启动调度泵，`autoResume == true` 时自动跑 queued 任务。
 - 写 `tasks.json` 采用「临时文件 + rename」原子写，每 2 秒或在状态终态时落盘。
 

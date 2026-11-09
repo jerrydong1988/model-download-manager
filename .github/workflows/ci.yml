@@ -57,6 +57,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            if ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Release tags require an updater signing key' }
             '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -Encoding utf8 updater-config.json
             'UPDATER_CONFIG=--config updater-config.json' | Out-File -FilePath $env:GITHUB_ENV -Append
           }
@@ -110,4 +111,5 @@ jobs:
           cd release-assets
           sha256sum -c SHA256SUMS.txt
           cd ..
+          node scripts/check-update-release.mjs release-assets
           gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "Model Download Manager $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md --latest

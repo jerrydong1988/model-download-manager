@@ -48,7 +48,7 @@ import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { Skeleton } from '../components/ui/Skeleton'
 import { Switch } from '../components/ui/Switch'
 import { cx } from '../lib/cx'
-import { canInstallUpdate, updateProgressPercent } from '../lib/updateFlow'
+import { canInstallUpdate, updateProgressPercent, validUpdateEndpoint } from '../lib/updateFlow'
 
 const HF_OFFICIAL = 'https://huggingface.co'
 const HF_MIRROR = 'https://hf-mirror.com'
@@ -114,10 +114,10 @@ function validateDraft(
     errors.proxy = '代理格式应为 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080'
   }
 
-  // v0.5.0：更新源留空 = 内置 GitHub 源；非空必须是 http(s) URL。
+  // 正式版更新器只接受 HTTPS。
   const updateEndpoint = draft.updateEndpoint.trim()
-  if (updateEndpoint && !isHttpEndpoint(updateEndpoint)) {
-    errors.updateEndpoint = '请填 http(s) 的 latest.json 完整地址，或留空使用内置源。'
+  if (!validUpdateEndpoint(updateEndpoint)) {
+    errors.updateEndpoint = '请填 HTTPS 的 latest.json 完整地址，或留空使用内置源。'
   }
 
   const bandwidth = parseMbToBytes(bandwidthRaw)
@@ -1065,7 +1065,7 @@ export default function SettingsPage() {
                 htmlFor="settings-update-endpoint"
                 optional
                 error={fieldErrors.updateEndpoint}
-                hint="留空使用内置 GitHub Releases 源；国内网络可填镜像 latest.json 完整地址，保存后生效。"
+                hint="留空使用 GitHub Releases，也可填写镜像 latest.json 的 HTTPS 地址。"
               >
                 <Input
                   id="settings-update-endpoint"
@@ -1134,7 +1134,7 @@ export default function SettingsPage() {
           title="立即安装更新？"
           description={
             updateState.info
-              ? `将下载并安装 v${updateState.info.version}。下载完成后自动安装并重启应用，未完成的下载任务会在重启后自动继续。`
+              ? `将下载并安装 v${updateState.info.version}，然后重启应用。${settings?.autoResume ? '正在下载和排队的任务会自动继续，已暂停的任务保持暂停。' : '自动继续已关闭，重启后请手动继续下载。'}`
               : '将下载并安装最新版本。下载完成后自动安装并重启应用。'
           }
           confirmLabel="下载并安装"

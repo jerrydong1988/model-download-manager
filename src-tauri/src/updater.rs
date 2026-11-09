@@ -87,14 +87,15 @@ pub async fn check_update(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn install_update(
     app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
     updates: tauri::State<'_, Arc<UpdateState>>,
 ) -> Result<(), String> {
     let update = take_pending(&updates).ok_or("没有待安装的更新，请先检查更新")?;
     let progress_app = app.clone();
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now();
-    let result = update
-        .download_and_install(
+    let bytes = update
+        .download(
             move |chunk_length, total| {
                 downloaded += chunk_length as u64;
                 let now = Instant::now();
@@ -109,14 +110,13 @@ pub async fn install_update(
             },
             || {},
         )
-        .await;
-    match result {
-        Ok(()) => {
-            let _ = app.emit("update-installed", serde_json::json!({}));
-            Ok(())
-        }
-        Err(error) => Err(format!("下载安装更新失败：{error}")),
-    }
+        .await
+        .map_err(|error| format!("下载更新失败：{error}"))?;
+    // Windows exits inside install(). Persist active/paused intent before handing off.
+    state.persist_tasks().map_err(|error| format!("保存下载队列失败，升级已中止：{error}"))?;
+    update.install(bytes).map_err(|error| format!("安装更新失败：{error}"))?;
+    let _ = app.emit("update-installed", serde_json::json!({}));
+    Ok(())
 }
 
 /// 启动自动检查：延迟数秒后检查一次；发现新版缓存并 emit `update-available`；失败静默。

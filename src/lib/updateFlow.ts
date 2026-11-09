@@ -29,6 +29,16 @@ export const INITIAL_UPDATE_SLICE: UpdateSlice = {
   error: null,
 }
 
+export function validUpdateEndpoint(value: string): boolean {
+  const endpoint = value.trim()
+  if (!endpoint) return true
+  try {
+    return /^https:\/\//i.test(endpoint) && Boolean(new URL(endpoint).hostname)
+  } catch {
+    return false
+  }
+}
+
 export function statusChecking(): UpdateSlice {
   return { status: 'checking', info: null, progress: null, error: null }
 }

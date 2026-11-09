@@ -3,6 +3,7 @@ import type { LucideIcon } from '../components/icons'
 import {
   AlertCircle,
   CheckCircle2,
+  Download,
   Eye,
   EyeOff,
   FolderOpen,
@@ -17,6 +18,7 @@ import {
   Moon,
   Palette,
   Plus,
+  RefreshCw,
   Save,
   ShieldAlert,
   Sun,
@@ -38,12 +40,15 @@ import { applyThemeSetting } from '../lib/theme'
 import { useAppStore } from '../store/appStore'
 import { APP_REFRESH_PAGE_EVENT } from '../components/layout/useGlobalShortcuts'
 import { Button } from '../components/ui/Button'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
 import { Field, Input } from '../components/ui/Input'
+import { ProgressBar } from '../components/ui/ProgressBar'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { Skeleton } from '../components/ui/Skeleton'
 import { Switch } from '../components/ui/Switch'
 import { cx } from '../lib/cx'
+import { canInstallUpdate, updateProgressPercent } from '../lib/updateFlow'
 
 const HF_OFFICIAL = 'https://huggingface.co'
 const HF_MIRROR = 'https://hf-mirror.com'
@@ -74,6 +79,7 @@ const FIELD_META: Record<string, { label: string; id: string }> = {
   msEndpoint: { label: 'ModelScope 端点', id: 'settings-ms-endpoint' },
   proxy: { label: 'HTTP 代理', id: 'settings-proxy' },
   bandwidthLimit: { label: '限速', id: 'settings-bandwidth' },
+  updateEndpoint: { label: '更新源', id: 'settings-update-endpoint' },
 }
 
 function settingsEqual(a: Settings, b: Settings): boolean {
@@ -108,6 +114,12 @@ function validateDraft(
     errors.proxy = '代理格式应为 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080'
   }
 
+  // v0.5.0：更新源留空 = 内置 GitHub 源；非空必须是 http(s) URL。
+  const updateEndpoint = draft.updateEndpoint.trim()
+  if (updateEndpoint && !isHttpEndpoint(updateEndpoint)) {
+    errors.updateEndpoint = '请填 http(s) 的 latest.json 完整地址，或留空使用内置源。'
+  }
+
   const bandwidth = parseMbToBytes(bandwidthRaw)
   if (bandwidth === null) {
     errors.bandwidthLimit = '请输入不小于 0 的数字（MB/s），0 表示不限速。'
@@ -130,6 +142,9 @@ function validateDraft(
     // v0.2.0：单文件连接数 1..=8；扫描根由本地模型库页管理，这里保持当前值不做修改。
     connectionsPerFile: clampInt(draft.connectionsPerFile, 1, 8),
     libraryRoots: draft.libraryRoots ?? [],
+    // v0.5.0：在线升级
+    autoCheckUpdates: Boolean(draft.autoCheckUpdates),
+    updateEndpoint,
   }
   return { cleaned, errors }
 }
@@ -260,6 +275,13 @@ export default function SettingsPage() {
   const pushToast = useAppStore((state) => state.pushToast)
   const setSettings = useAppStore((state) => state.setSettings)
   const setPage = useAppStore((state) => state.setPage)
+  // v0.5.0：在线升级（切片命名 updateState，避免与草稿辅助函数 update() 冲突）
+  const updateState = useAppStore((state) => state.update)
+  const checkForUpdates = useAppStore((state) => state.checkForUpdates)
+  const installUpdate = useAppStore((state) => state.installUpdate)
+
+  const [installConfirmOpen, setInstallConfirmOpen] = useState(false)
+  const updatePercent = updateProgressPercent(updateState.progress)
 
   const [draft, setDraft] = useState<Settings | null>(null)
   const [bandwidthInput, setBandwidthInput] = useState('0')
@@ -944,6 +966,125 @@ export default function SettingsPage() {
                 </div>
               </div>
             </Section>
+
+            {/* 关于与更新（v0.5.0） */}
+            <Section
+              title="关于与更新"
+              description="检查应用新版本并一键升级；更新源可指向镜像 latest.json。便携版不支持自动升级。"
+              icon={RefreshCw}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-body font-medium text-fg">
+                    当前版本 v{appVersion || '—'}
+                  </p>
+                  <p className="mt-0.5 text-meta leading-4 text-fg-secondary">
+                    更新包需通过发布方数字签名校验；下载与安装在应用内完成。
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={updateState.status === 'checking'}
+                  disabled={updateState.status === 'downloading'}
+                  onClick={() => void checkForUpdates(true)}
+                  leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+                  className="shrink-0"
+                >
+                  检查更新
+                </Button>
+              </div>
+
+              {updateState.status === 'upToDate' ? (
+                <p className="flex items-center gap-1.5 text-meta text-success" role="status">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  已是最新版本
+                </p>
+              ) : null}
+
+              {updateState.status === 'failed' && updateState.error ? (
+                <ErrorBanner
+                  title="检查更新失败"
+                  message={updateState.error}
+                  onRetry={() => void checkForUpdates(true)}
+                />
+              ) : null}
+
+              {updateState.status === 'available' && updateState.info ? (
+                <div className="rounded-control border border-primary/30 bg-primary-soft/50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-body font-medium text-fg">
+                      发现新版本 v{updateState.info.version}
+                    </span>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={!canInstallUpdate(updateState.status)}
+                      onClick={() => setInstallConfirmOpen(true)}
+                      leftIcon={<Download className="h-3.5 w-3.5" />}
+                    >
+                      立即更新
+                    </Button>
+                  </div>
+                  {updateState.info.notes ? (
+                    <p className="mt-2 whitespace-pre-wrap text-meta leading-5 text-fg-secondary">
+                      {updateState.info.notes}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {updateState.status === 'downloading' ? (
+                <div aria-live="polite">
+                  <div className="mb-1.5 flex items-center justify-between text-meta text-fg-secondary">
+                    <span>正在下载更新…</span>
+                    <span className="tabular-nums">
+                      {updatePercent === null ? '准备中' : `${updatePercent}%`}
+                    </span>
+                  </div>
+                  <ProgressBar
+                    value={updatePercent ?? 0}
+                    indeterminate={updatePercent === null}
+                    ariaLabel="下载更新进度"
+                  />
+                </div>
+              ) : null}
+
+              {updateState.status === 'installed' ? (
+                <p
+                  className="flex items-center gap-1.5 text-meta text-success"
+                  role="status"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  更新已安装，应用即将重启…
+                </p>
+              ) : null}
+
+              <Field
+                label="更新源"
+                htmlFor="settings-update-endpoint"
+                optional
+                error={fieldErrors.updateEndpoint}
+                hint="留空使用内置 GitHub Releases 源；国内网络可填镜像 latest.json 完整地址，保存后生效。"
+              >
+                <Input
+                  id="settings-update-endpoint"
+                  value={draft.updateEndpoint}
+                  onChange={(event) => update('updateEndpoint', event.target.value)}
+                  placeholder="https://mirror.example.com/.../latest.json"
+                  spellCheck={false}
+                  className="font-mono"
+                />
+              </Field>
+
+              <ToggleRow
+                title="启动时自动检查更新"
+                description="启动数秒后静默检查，发现新版本才提示；检查失败不打扰。"
+                checked={draft.autoCheckUpdates}
+                onChange={(value) => update('autoCheckUpdates', value)}
+                ariaLabel="启动时自动检查更新"
+              />
+            </Section>
           </div>
         </div>
 
@@ -986,6 +1127,24 @@ export default function SettingsPage() {
             </Button>
           </div>
         </section>
+
+        {/* v0.5.0：安装更新确认（进度在「关于与更新」区内联展示） */}
+        <ConfirmDialog
+          open={installConfirmOpen}
+          title="立即安装更新？"
+          description={
+            updateState.info
+              ? `将下载并安装 v${updateState.info.version}。下载完成后自动安装并重启应用，未完成的下载任务会在重启后自动继续。`
+              : '将下载并安装最新版本。下载完成后自动安装并重启应用。'
+          }
+          confirmLabel="下载并安装"
+          tone="primary"
+          onConfirm={() => {
+            setInstallConfirmOpen(false)
+            void installUpdate()
+          }}
+          onClose={() => setInstallConfirmOpen(false)}
+        />
     </div>
   )
 }

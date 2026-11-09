@@ -49,8 +49,23 @@ jobs:
       - name: Backend regression tests
         working-directory: src-tauri
         run: cargo test --locked --no-fail-fast
+      # v0.5.0：updater 签名。同仓库运行有 secrets 时生成签名产物；
+      # fork PR 无私钥时用 --config 关闭 createUpdaterArtifacts，保证 CI 可构建。
+      - name: Resolve updater signing switch
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -Encoding utf8 updater-config.json
+            'UPDATER_CONFIG=--config updater-config.json' | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
       - name: Build Windows installer and executable
-        run: npm run tauri:build -- --bundles nsis
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri:build -- --bundles nsis $env:UPDATER_CONFIG
       - name: Collect release files and checksums
         shell: pwsh
         run: |
@@ -67,6 +82,8 @@ jobs:
             "$hash  $($_.Name)"
           }
           $lines | Set-Content release-assets/SHA256SUMS.txt -Encoding utf8
+      - name: Generate updater manifest
+        run: node scripts/gen-update-manifest.mjs release-assets
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-release

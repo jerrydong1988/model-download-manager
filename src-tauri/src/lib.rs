@@ -25,6 +25,10 @@ mod segmented;
 #[cfg(not(test))]
 pub mod commands;
 
+// v0.5.0 在线升级：同 commands/desktop，仅非单元测试构建编译。
+#[cfg(not(test))]
+pub mod updater;
+
 #[cfg(not(test))]
 mod desktop;
 

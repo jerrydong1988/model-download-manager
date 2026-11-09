@@ -16,7 +16,7 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::state::AppState;
 use crate::util::AppHandleSink;
-use crate::{commands, queue, settings, state};
+use crate::{commands, queue, settings, state, updater};
 
 const TRAY_ID: &str = "main-tray";
 const MAIN_WINDOW: &str = "main";
@@ -30,6 +30,8 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 handle_close_requested(window, api);
@@ -67,6 +69,14 @@ pub fn run() {
                 }
             }));
             app.manage(state.clone());
+
+            // v0.5.0：在线升级。待装更新缓存独立管理；autoCheckUpdates 默认开，
+            // 启动延迟自动检查一次，失败静默（见 updater::spawn_auto_check）。
+            let update_state = std::sync::Arc::new(updater::UpdateState::default());
+            app.manage(update_state.clone());
+            if state.current_settings().auto_check_updates {
+                updater::spawn_auto_check(app.handle().clone(), state.clone(), update_state);
+            }
 
             // 调度泵：autoResume 时自动继续 queued 任务。
             queue::spawn_pump(app.handle().clone(), state);
@@ -116,6 +126,8 @@ pub fn run() {
             commands::get_default_download_dir,
             commands::open_data_dir,
             commands::disk_space,
+            updater::check_update,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

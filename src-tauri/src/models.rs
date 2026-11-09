@@ -151,6 +151,18 @@ pub struct Settings {
     pub connections_per_file: u32,
     /// v0.2.0：本地库附加扫描根目录（绝对路径）；空 = 仅扫描 downloadDir
     pub library_roots: Vec<String>,
+    /// v0.5.0：启动时自动检查应用更新，默认 true
+    pub auto_check_updates: bool,
+    /// v0.5.0：更新源覆盖端点（latest.json 完整 URL）；空 = 使用内置 GitHub Releases 端点
+    pub update_endpoint: String,
+}
+
+/// 在线升级：检查到新版本的信息（命令 `check_update` / 事件 `update-available`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
 }
 
 /// 搜索结果条目（命令 2）。

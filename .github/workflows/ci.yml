@@ -46,6 +46,21 @@ jobs:
         run: npm run check:icons
       - name: Build frontend
         run: npm run build
+      - name: Test home screen update actions
+        shell: pwsh
+        run: |
+          $chrome = (Get-Command chrome -ErrorAction SilentlyContinue).Source
+          if (!$chrome) { $chrome = Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe' }
+          if (!(Test-Path -LiteralPath $chrome)) { $chrome = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe' }
+          $preview = Start-Process node -ArgumentList 'node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort' -WindowStyle Hidden -PassThru
+          try {
+            $browser = Start-Process $chrome -ArgumentList "--headless=new --no-first-run --disable-gpu --remote-debugging-port=19325 --user-data-dir=`"$env:RUNNER_TEMP/update-browser`" about:blank" -WindowStyle Hidden -PassThru
+            node tests/e2e/main-update.mjs
+            if ($LASTEXITCODE) { throw 'Home screen update test failed' }
+          } finally {
+            if ($browser) { Stop-Process -Id $browser.Id -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $preview.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Backend regression tests
         working-directory: src-tauri
         run: cargo test --locked --no-fail-fast

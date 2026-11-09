@@ -58,8 +58,8 @@ export function statusCheckFailed(error: string): UpdateSlice {
   return { status: 'failed', info: null, progress: null, error }
 }
 
-export function statusDownloading(): UpdateSlice {
-  return { status: 'downloading', info: null, progress: null, error: null }
+export function statusDownloading(info: UpdateInfo): UpdateSlice {
+  return { status: 'downloading', info, progress: null, error: null }
 }
 
 export function statusInstalled(info: UpdateInfo | null): UpdateSlice {
@@ -77,11 +77,6 @@ export function canInstallUpdate(status: UpdateStatus): boolean {
   return status === 'available'
 }
 
-/** Sidebar/入口的「有新版本」可见提示：available/downloading/installed 期间保留。 */
-export function hasVisibleUpdate(status: UpdateStatus): boolean {
-  return status === 'available' || status === 'downloading' || status === 'installed'
-}
-
 /** 检查/下载进行中不被 update-available 事件覆盖（检查中会自行给出结果）。 */
 export function shouldApplyAvailableEvent(status: UpdateStatus): boolean {
   return status === 'idle' || status === 'upToDate'
@@ -90,9 +85,4 @@ export function shouldApplyAvailableEvent(status: UpdateStatus): boolean {
 /** 进度事件仅在 downloading 期间应用，防止过期 tick 污染其他状态。 */
 export function shouldApplyProgressEvent(status: UpdateStatus): boolean {
   return status === 'downloading'
-}
-
-/** 自动检查发现新版的 Toast 描述文案。 */
-export function autoUpdateToastDescription(info: UpdateInfo): string {
-  return `v${info.version} 可用，可在设置页「关于与更新」一键升级。`
 }

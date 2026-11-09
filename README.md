@@ -51,7 +51,7 @@ v0.4.2 将界面改为浅灰与薄荷绿，并在每个页面右上角一键切�
 - **下载前检查与完成后校验（v0.4.0）**：目标盘放不下已选文件时不能开始下载；分段预分配后剩余空间低于 1 GB 时给出提示，仍允许继续。完成后保留 HuggingFace LFS oid 和 ModelScope 的 Sha256，在后台核对，不一致则标为失败并原地保留文件，移走冲突文件后可重试
 - **最近打开与收藏（v0.4.0）**：只保存在本机，显示在浏览页，不需要账号
 - **网络适配**：默认使用 HuggingFace 镜像 `hf-mirror.com`（国内可用），可切回官方；支持 HTTP/SOCKS 代理；可选平台 Token（gated / 私有仓库）
-- **应用内在线升级（v0.5.0）**：启动自动检查新版本（可在设置关闭），发现新版弹提示；设置页「关于与更新」手动检查、查看更新说明、一键下载安装并自动重启。更新包经 minisign 数字签名校验；更新源可指向镜像 `latest.json`（国内网络友好）。仅 NSIS 安装版支持，免安装版仍需手动替换
+- **应用内在线升级（v0.5.0）**：启动自动检查新版本（可在设置关闭），发现新版时，可直接点击提示或侧栏的「立即升级」下载安装；设置页「关于与更新」手动检查、查看更新说明、一键下载安装并自动重启。更新包经 minisign 数字签名校验；更新源可指向镜像 `latest.json`（国内网络友好）。仅 NSIS 安装版支持，免安装版仍需手动替换
 
 ## 环境要求
 
@@ -90,7 +90,7 @@ cd src-tauri; cargo test # 后端单元 + 本地 HTTP 集成回归（CI 运行�
 ```powershell
 npm run tauri:build
 # 免安装可执行文件：src-tauri\target\release\model-download-manager.exe
-# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.1_x64-setup.exe
+# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.2_x64-setup.exe
 ```
 
 正式发布须配置 minisign 签名密钥。CI 会验证安装包签名、版本和 `latest.json`，检查通过才发布。开发分支可构建无签名测试包。

@@ -1,13 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  autoUpdateToastDescription,
   canInstallUpdate,
-  hasVisibleUpdate,
   shouldApplyAvailableEvent,
   shouldApplyProgressEvent,
   statusAfterCheck,
   statusCheckFailed,
+  statusDownloading,
   statusInstalled,
   updateProgressPercent,
   validUpdateEndpoint,
@@ -54,15 +53,6 @@ test('canInstallUpdate：仅 available 允许立即更新', () => {
   }
 })
 
-test('hasVisibleUpdate：available/downloading/installed 显示提示，failed 不残留', () => {
-  assert.ok(hasVisibleUpdate('available'))
-  assert.ok(hasVisibleUpdate('downloading'))
-  assert.ok(hasVisibleUpdate('installed'))
-  assert.ok(!hasVisibleUpdate('idle'))
-  assert.ok(!hasVisibleUpdate('upToDate'))
-  assert.ok(!hasVisibleUpdate('failed'))
-})
-
 test('事件守卫：checking/downloading 期间不被 update-available 覆盖', () => {
   assert.ok(shouldApplyAvailableEvent('idle'))
   assert.ok(shouldApplyAvailableEvent('upToDate'))
@@ -87,6 +77,8 @@ test('失败与完成切片保留必要信息', () => {
   assert.equal(installed.info?.version, '0.5.0')
 })
 
-test('自动检查 Toast 文案含版本号', () => {
-  assert.match(autoUpdateToastDescription(info), /0\.5\.0/)
+test('下载期间保留正在安装的版本，并阻止重复安装', () => {
+  const downloading = statusDownloading(info)
+  assert.equal(downloading.info, info)
+  assert.equal(canInstallUpdate(downloading.status), false)
 })

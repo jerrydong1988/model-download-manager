@@ -21,7 +21,7 @@ import { defaultRevisionFor, formatBytes } from '../lib/format'
 import { getPendingTheme } from '../lib/themeIntent'
 import {
   INITIAL_UPDATE_SLICE,
-  autoUpdateToastDescription,
+  canInstallUpdate,
   shouldApplyAvailableEvent,
   shouldApplyProgressEvent,
   statusAfterCheck,
@@ -495,6 +495,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   /* ---------------- v0.5.0 在线升级 ---------------- */
 
   checkForUpdates: async (manual) => {
+    const status = get().update.status
+    if (status === 'checking' || status === 'downloading' || status === 'installed') return
     set({ update: statusChecking() })
     try {
       const info = await ipc.checkUpdate()
@@ -507,29 +509,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   installUpdate: async () => {
-    set({ update: statusDownloading() })
+    const update = get().update
+    if (!canInstallUpdate(update.status) || !update.info) return
+    set({ update: statusDownloading(update.info) })
     try {
       await ipc.installUpdate()
     } catch (error) {
       const message = toErrorText(error)
       set({ update: statusCheckFailed(message) })
-      get().pushToast('error', '安装更新失败', message)
+      get().pushToast('error', '安装更新失败', message, {
+        label: '重新检查',
+        onClick: () => void get().checkForUpdates(true),
+      })
       return
     }
-    // Windows 安装程序可能已接管退出；若进程仍在（静默失败等）主动重启。
-    set({ update: statusInstalled(get().update.info) })
-    get().pushToast('success', '更新已安装', '应用即将重启以完成升级。')
-    void ipc.restartApp().catch((error: unknown) => {
-      get().pushToast('error', '无法自动重启', toErrorText(error))
-    })
+    // The installed event and command completion can both reach the same instance.
+    get().handleUpdateInstalled()
   },
 
   handleUpdateAvailable: (info) => {
     if (!shouldApplyAvailableEvent(get().update.status)) return
     set({ update: statusAfterCheck(false, info) })
-    get().pushToast('info', `发现新版本 v${info.version}`, autoUpdateToastDescription(info), {
-      label: '查看更新',
-      onClick: () => get().setPage('settings'),
+    get().pushToast('info', `发现新版本 v${info.version}`, '更新完成后将自动重启应用。', {
+      label: '立即升级',
+      onClick: () => {
+        if (get().update.info?.version === info.version) void get().installUpdate()
+      },
     })
   },
 
@@ -539,8 +544,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleUpdateInstalled: () => {
-    if (get().update.status === 'installed') return
+    if (get().update.status !== 'downloading') return
     set({ update: statusInstalled(get().update.info) })
+    get().pushToast('success', '更新已安装', '应用即将重启。')
     void ipc.restartApp().catch((error: unknown) => {
       get().pushToast('error', '无法自动重启', toErrorText(error))
     })

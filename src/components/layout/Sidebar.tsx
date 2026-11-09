@@ -3,7 +3,7 @@ import type { LucideIcon } from '../icons'
 import { useAppStore, type PageKey } from '../../store/appStore'
 import { formatSpeed } from '../../lib/format'
 import { isRunningStatus } from '../../lib/labels'
-import { hasVisibleUpdate } from '../../lib/updateFlow'
+import { updateProgressPercent } from '../../lib/updateFlow'
 import { cx } from '../../lib/cx'
 
 const NAV: Array<{ page: PageKey; label: string; icon: LucideIcon }> = [
@@ -18,7 +18,9 @@ export function Sidebar() {
   const setPage = useAppStore((state) => state.setPage)
   const tasks = useAppStore((state) => state.tasks)
   const appVersion = useAppStore((state) => state.appVersion)
-  const updateStatus = useAppStore((state) => state.update.status)
+  const update = useAppStore((state) => state.update)
+  const installUpdate = useAppStore((state) => state.installUpdate)
+  const updatePercent = updateProgressPercent(update.progress)
   const running = tasks.filter((task) => isRunningStatus(task.status))
   const totalSpeed = running.reduce((sum, task) => sum + task.speed, 0)
 
@@ -63,17 +65,25 @@ export function Sidebar() {
         ) : null}
         <p className="text-meta text-fg-muted">
           v{appVersion || '—'} · 桌面版
-          {hasVisibleUpdate(updateStatus) ? (
-            <button
-              type="button"
-              onClick={() => setPage('settings')}
-              className="ml-1.5 inline-flex cursor-pointer items-center gap-1 align-baseline text-warning hover:underline"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden="true" />
-              有新版本
-            </button>
-          ) : null}
         </p>
+        {update.status === 'available' && update.info ? (
+          <button
+            type="button"
+            onClick={() => void installUpdate()}
+            title="下载安装后将自动重启应用"
+            className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-control text-meta font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            立即升级到 v{update.info.version}
+          </button>
+        ) : null}
+        {update.status === 'downloading' || update.status === 'installed' ? (
+          <p role="status" className="mt-2 text-meta tabular-nums text-fg-secondary">
+            {update.status === 'installed' ? '正在重启…'
+              : updatePercent === null ? '正在下载更新…'
+              : updatePercent === 100 ? '正在安装更新…' : `正在下载更新 ${updatePercent}%`}
+          </p>
+        ) : null}
       </div>
     </aside>
   )

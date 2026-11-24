@@ -12,9 +12,11 @@ import type {
   GetRepoDetailArgs,
   ListRevisionsArgs,
   LocalFile,
+  LocalRepoMatch,
   OpenPathArgs,
   RemoveTasksArgs,
   RepoSearchPage,
+  RepoFile,
   RevisionList,
   SaveSettingsArgs,
   SearchReposArgs,
@@ -25,6 +27,7 @@ import type {
   UpdateInfo,
 } from '../types'
 import { defaultRevisionFor } from '../lib/format'
+import { downloadFinalPath, downloadPathKey } from '../lib/downloadPaths'
 import {
   classifyRepoPath,
   createMockLibrary,
@@ -35,7 +38,6 @@ import {
   createStressTasks,
   getMockRepoDetail,
   getMockRevisions,
-  mockFinalPath,
   MOCK_APP_VERSION,
   MOCK_DATA_DIR,
   MOCK_DEFAULT_DOWNLOAD_DIR,
@@ -411,6 +413,32 @@ export function createMockBridge(): MockBridge {
         return result(clone(getMockRepoDetail(source, repoId, revision)))
       }
 
+      case 'inspect_repo_files': {
+        const { source, repoId, revision, saveDir, files } = args as unknown as GetRepoDetailArgs & { saveDir: string; files: RepoFile[] }
+        const matches: LocalRepoMatch[] = []
+        for (const file of files) {
+          const target = downloadPathKey(downloadFinalPath(saveDir, source, repoId, revision || defaultRevisionFor(source), file.path))
+          const owner = tasks.find(task => downloadPathKey(task.savePath) === target)
+          const diskFile = library.find(item => downloadPathKey(item.path) === target)
+          let status: LocalRepoMatch['status']
+          if (owner && owner.status !== 'completed') {
+            if (owner.source === source && owner.remotePath === file.path) continue
+            status = 'occupied'
+          } else if (!diskFile) {
+            if (!owner) continue
+            status = 'missing'
+          } else if (file.size > 0 && diskFile.size !== file.size) {
+            status = 'different'
+          } else if (file.sha256 && owner?.verifyStatus === 'verified' && owner.sha256) {
+            status = file.sha256 === owner.sha256 ? 'verified' : 'different'
+          } else {
+            status = 'present'
+          }
+          matches.push({ path: file.path, status, source: owner?.source ?? null })
+        }
+        return result(matches)
+      }
+
       case 'list_revisions': {
         const { source, repoId } = args as unknown as ListRevisionsArgs
         if (revisionsFailFixture) {
@@ -425,11 +453,8 @@ export function createMockBridge(): MockBridge {
         const created: DownloadTask[] = []
         const now = Date.now()
         for (const request of requests ?? []) {
-          const savePath = mockFinalPath(
-            request.saveDir,
-            request.repoId,
-            request.remotePath,
-          )
+          const savePath = downloadFinalPath(request.saveDir, request.source, request.repoId,
+            request.revision?.trim() || defaultRevisionFor(request.source), request.remotePath)
           const duplicated = tasks.some(
             (task) =>
               task.source === request.source &&

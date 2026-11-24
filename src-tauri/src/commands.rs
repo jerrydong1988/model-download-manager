@@ -82,21 +82,41 @@ pub async fn get_repo_detail(
 }
 
 // ---------------------------------------------------------------------------
-// 4. start_downloads
+// 3c. inspect_repo_files
 // ---------------------------------------------------------------------------
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn inspect_repo_files(
+    state: tauri::State<'_, Arc<AppState>>,
+    source: Source,
+    repo_id: String,
+    revision: String,
+    save_dir: String,
+    files: Vec<crate::models::RepoFile>,
+    verify: bool,
+) -> Result<Vec<crate::local_files::LocalMatch>, String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        crate::local_files::inspect(&state, source, &repo_id, &revision, &save_dir, &files, verify)
+    })
+    .await
+    .map_err(|e| format!("检查本地文件失败：{e}"))
+}
 
 /// 命令 4：批量新建下载任务。
 ///
 /// 注意：自 P2a 起本命令**逐条校验、非法项被跳过**（仅当整批全部非法时返回首个中文
 /// 错误，前端 toast 可提示）；返回值仍为契约规定的「实际新建的任务列表」。
 #[tauri::command(rename_all = "camelCase")]
-pub fn start_downloads(
+pub async fn start_downloads(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     requests: Vec<DownloadRequest>,
 ) -> Result<Vec<DownloadTask>, String> {
-    let sink = AppHandleSink::new(app);
-    queue::start_downloads(state.inner(), requests, &sink)
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || queue::start_downloads(&state, requests, &AppHandleSink::new(app)))
+        .await
+        .map_err(|e| format!("创建下载任务失败：{e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -368,18 +388,8 @@ fn delete_local_file_impl(
     }
 
     // 只允许删除已配置扫描根（downloadDir ∪ libraryRoots）内的文件，防止前端误删任意路径。
-    let settings = state.current_settings();
-    let target_canon = target
-        .canonicalize()
-        .map_err(|err| format!("无法解析文件路径：{err}"))?;
-    let allowed = library_scan_roots(&settings).iter().any(|root| {
-        root.canonicalize()
-            .map(|root_canon| target_canon.starts_with(&root_canon))
-            .unwrap_or(false)
-    });
-    if !allowed {
-        return Err("只能删除已配置扫描根目录内的文件".to_string());
-    }
+    ensure_within_scan_roots(state, &target)
+        .map_err(|_| "只能删除已配置扫描根目录内的文件".to_string())?;
 
     let matched: Vec<DownloadTask> = state
         .tasks_snapshot()

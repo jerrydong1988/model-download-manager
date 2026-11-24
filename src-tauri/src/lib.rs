@@ -8,6 +8,7 @@ pub mod batch_notice;
 pub mod download;
 pub mod integrity;
 pub mod library;
+pub mod local_files;
 pub mod models;
 pub mod notifications;
 pub mod queue;

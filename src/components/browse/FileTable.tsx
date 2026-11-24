@@ -3,8 +3,8 @@ import type { RepoFile } from '../../types'
 import {
   FileTableHeader,
   FileTableRow,
-  type FileStateInfo,
 } from './RepoDetailHeader'
+import type { FileStateInfo } from '../../lib/repoFileState'
 import { EmptyState } from '../ui/EmptyState'
 import { FileQuestion } from '../icons'
 

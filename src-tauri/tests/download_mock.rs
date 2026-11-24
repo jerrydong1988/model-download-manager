@@ -251,6 +251,7 @@ fn build_context(
         on_retry: None,
         connections: 1,
         chunk_size_override: None,
+        sha256_known: false,
     }
 }
 
@@ -278,12 +279,14 @@ async fn resumes_after_mid_stream_disconnect() {
         match request.range_start {
             Some(start) => {
                 let start = start as usize;
-                MockResponse::new(206, "Partial Content", full[start..].to_vec()).header(
-                    "Content-Range",
-                    &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
-                )
+                MockResponse::new(206, "Partial Content", full[start..].to_vec())
+                    .header(
+                        "Content-Range",
+                        &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
+                    )
+                    .header("ETag", "\"v1\"")
             }
-            None => MockResponse::ok(full).truncated(300),
+            None => MockResponse::ok(full).truncated(300).header("ETag", "\"v1\""),
         }
     })
     .await;
@@ -315,7 +318,7 @@ async fn resumes_after_mid_stream_disconnect() {
 #[tokio::test]
 async fn handles_modelscope_style_200_with_content_range() {
     let dir = unique_dir("ms-200-cr");
-    seed_legacy_meta(&dir, 0);
+    seed_legacy_meta_with_etag(&dir, 0, "\"v1\"");
     let full = content();
     // 预埋 300 字节 part，模拟上次中断。
     std::fs::write(dir.join("model.safetensors.part"), &full[..300]).unwrap();
@@ -325,10 +328,12 @@ async fn handles_modelscope_style_200_with_content_range() {
         let start = request.range_start.expect("续传必须带 Range") as usize;
         assert_eq!(start, 300, "Range 起点应为已下载字节数");
         // ModelScope 实测：对 Range 请求返回 200 + Content-Range（非 206）。
-        MockResponse::ok(full[start..].to_vec()).header(
-            "Content-Range",
-            &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
-        )
+        MockResponse::ok(full[start..].to_vec())
+            .header(
+                "Content-Range",
+                &format!("bytes {start}-{}/{TOTAL}", TOTAL - 1),
+            )
+            .header("ETag", "\"v1\"")
     })
     .await;
 
@@ -1120,6 +1125,17 @@ async fn legacy_single_stream_part_restarts_when_etag_mismatches() {
 
 fn seed_legacy_meta(dir: &Path, total: u64) {
     let meta = serde_json::json!({ "repoId": "org/model", "remotePath": "model.safetensors", "total": total });
+    util::atomic_write_json(&dir.join("model.safetensors.part.json"), &meta).unwrap();
+}
+
+/// 与 [`seed_legacy_meta`] 相同，但写入强 ETag，用于通过 R1 续传版本校验。
+fn seed_legacy_meta_with_etag(dir: &Path, total: u64, etag: &str) {
+    let meta = serde_json::json!({
+        "repoId": "org/model",
+        "remotePath": "model.safetensors",
+        "total": total,
+        "etag": etag,
+    });
     util::atomic_write_json(&dir.join("model.safetensors.part.json"), &meta).unwrap();
 }
 

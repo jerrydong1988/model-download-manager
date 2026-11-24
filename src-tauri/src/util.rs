@@ -338,17 +338,14 @@ pub fn task_path_key(path: &Path) -> String {
     }
 }
 
-pub fn task_paths_conflict(left: &Path, right: &Path) -> bool {
-    let paths = |path: &Path| {
-        [
-            path.to_path_buf(),
-            with_suffix(path, ".part"),
-            with_suffix(path, ".part.json"),
-        ]
+pub fn task_path_keys(path: &Path) -> [String; 3] {
+    [path.to_path_buf(), with_suffix(path, ".part"), with_suffix(path, ".part.json")]
         .map(|path| task_path_key(&path))
-    };
-    let left = paths(left);
-    let right = paths(right);
+}
+
+pub fn task_paths_conflict(left: &Path, right: &Path) -> bool {
+    let left = task_path_keys(left);
+    let right = task_path_keys(right);
     left.iter().any(|key| right.contains(key))
 }
 

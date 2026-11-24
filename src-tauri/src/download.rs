@@ -121,6 +121,8 @@ pub struct TransferContext {
     pub connections: u32,
     /// 测试用分块大小覆盖（生产为 `segmented::CHUNK_SIZE`）。
     pub chunk_size_override: Option<u64>,
+    /// 是否存在 SHA-256 校验值（长度未知时，仅凭它才能确认完整性）。
+    pub sha256_known: bool,
 }
 
 /// 传输结果。
@@ -235,7 +237,10 @@ pub fn backoff_delay(retry_number: u32) -> Duration {
 }
 
 /// 续传前校验 `.part.json` 记录的 etag/lastModified 与响应头是否一致。
-/// 任一记录缺失时视为一致（无法校验时不阻塞续传）。
+///
+/// R1：必须至少有一对可比对的校验器（etag 或 last-modified）且全部一致才允许续传。
+/// 两侧都缺失时无法证明远端未变，返回 `false`，调用方应从头下载，而不是把新字节
+/// 拼接到可能属于旧版本的断点之后。
 pub fn resume_headers_match(
     meta: &PartMeta,
     response_etag: Option<&str>,
@@ -244,18 +249,23 @@ pub fn resume_headers_match(
     fn non_empty(value: Option<&str>) -> Option<&str> {
         value.filter(|text| !text.trim().is_empty())
     }
-    let etag_ok = match (non_empty(meta.etag.as_deref()), non_empty(response_etag)) {
-        (Some(saved), Some(current)) => saved == current,
-        _ => true,
+    let etag_pair = match (non_empty(meta.etag.as_deref()), non_empty(response_etag)) {
+        (Some(saved), Some(current)) => Some(saved == current),
+        _ => None,
     };
-    let modified_ok = match (
+    let modified_pair = match (
         non_empty(meta.last_modified.as_deref()),
         non_empty(response_last_modified),
     ) {
-        (Some(saved), Some(current)) => saved == current,
-        _ => true,
+        (Some(saved), Some(current)) => Some(saved == current),
+        _ => None,
     };
-    etag_ok && modified_ok
+    // 任一可比对的校验器不一致 → 不匹配。
+    if etag_pair == Some(false) || modified_pair == Some(false) {
+        return false;
+    }
+    // 至少一对可比对且一致才算匹配；全部缺失时无法证明未变。
+    etag_pair == Some(true) || modified_pair == Some(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +437,19 @@ fn actual_downloaded(ctx: &TransferContext, fallback: u64) -> u64 {
         .map(|metadata| metadata.len())
         .unwrap_or(fallback)
         .max(fallback)
+}
+
+/// R4：删除断点相关文件。文件不存在视为成功；其他错误必须上报，
+/// 否则残留的旧 `.part` 可能在下次续传时被误用。
+pub(crate) async fn remove_stale_file(path: &std::path::Path) -> Result<(), DownloadError> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(DownloadError::non_retryable(format!(
+            "无法清理旧的临时文件 {}：{error}",
+            path.display()
+        ))),
+    }
 }
 
 /// 完成：rename part → final，删除 part.json，发最终进度。
@@ -977,8 +1000,8 @@ pub async fn transfer(
                         ));
                     }
                     remote_reset_used = true;
-                    let _ = tokio::fs::remove_file(&ctx.part_path).await;
-                    let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+                    remove_stale_file(&ctx.part_path).await?;
+                    remove_stale_file(&ctx.meta_path).await?;
                     downloaded = 0;
                     total_size = ctx.total_size;
                     progress.emit(0, total_size, true);
@@ -1031,8 +1054,8 @@ pub async fn transfer(
                     ));
                 }
                 remote_reset_used = true;
-                let _ = tokio::fs::remove_file(&ctx.part_path).await;
-                let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+                remove_stale_file(&ctx.part_path).await?;
+                remove_stale_file(&ctx.meta_path).await?;
                 downloaded = 0;
                 total_size = ctx.total_size;
                 progress.emit(0, total_size, true);
@@ -1074,6 +1097,17 @@ pub async fn transfer(
     }
 }
 
+/// 长度未知但存在 SHA-256 时：视为传输完成，把文件交给后续内容校验判定。
+async fn finish_transfer_unverified(
+    ctx: &TransferContext,
+    written: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    progress: &mut ProgressReporter<'_>,
+) -> Result<TransferOutcome, DownloadError> {
+    finish_transfer(ctx, written, written, etag, last_modified, progress).await
+}
+
 /// 流式写入完成后：足够长则完成，不足则按可重试中断处理。
 #[allow(clippy::too_many_arguments)]
 async fn finish_or_retry(
@@ -1092,8 +1126,26 @@ async fn finish_or_retry(
         ));
     }
     let complete = total_size > 0 && written == total_size;
-    let unknown_total_finished = total_size == 0;
-    if complete || unknown_total_finished {
+    // R2：长度未知时，流正常结束无法证明文件完整（连接可能在任意字节被截断）。
+    // 仅当已知 SHA-256 时才交由后续内容校验判定；否则保留断点并报错，不标记为成功。
+    if !complete && total_size == 0 {
+        if ctx.sha256_known {
+            return finish_transfer_unverified(
+                ctx,
+                written,
+                etag.clone(),
+                last_modified.clone(),
+                progress,
+            )
+            .await
+            .map(Some);
+        }
+        save_part_meta(ctx, total_size, etag, last_modified);
+        return Err(DownloadError::non_retryable(
+            "服务器未提供文件长度，且没有可用的 SHA-256 校验，无法确认下载完整，已保留临时文件。请改用提供文件大小或校验值的下载源后重试",
+        ));
+    }
+    if complete {
         let outcome = finish_transfer(
             ctx,
             written,
@@ -1209,10 +1261,40 @@ mod tests {
             Some("\"abc\""),
             Some("Thu, 22 Oct 2015 07:28:00 GMT")
         ));
-        // 记录缺失或响应缺失时不阻塞续传。
+        // R1：没有可比对的校验器时必须拒绝续传（fail-closed）。
         meta.etag = None;
-        assert!(resume_headers_match(&meta, Some("\"def\""), None));
+        assert!(!resume_headers_match(&meta, Some("\"def\""), None));
         meta.last_modified = None;
-        assert!(resume_headers_match(&meta, None, None));
+        assert!(!resume_headers_match(&meta, None, None));
+    }
+
+    #[tokio::test]
+    async fn remove_stale_file_tolerates_missing_and_removes_existing() {
+        let dir = std::env::temp_dir().join(format!("mdm-r4-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let existing = dir.join("a.part");
+        std::fs::write(&existing, b"x").unwrap();
+        // 不存在的文件：视为成功。
+        assert!(remove_stale_file(&dir.join("missing.part")).await.is_ok());
+        // 存在的文件：必须被真正删除。
+        assert!(remove_stale_file(&existing).await.is_ok());
+        assert!(!existing.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_length_completion_requires_hash() {
+        // R2：长度未知时，仅当存在 SHA-256 才允许以"流结束"完成。
+        let may_complete = |written: u64, total: u64, sha256_known: bool| {
+            if total > 0 {
+                written == total
+            } else {
+                sha256_known
+            }
+        };
+        assert!(may_complete(10, 10, false));
+        assert!(!may_complete(7, 10, false));
+        assert!(!may_complete(7, 0, false));
+        assert!(may_complete(7, 0, true));
     }
 }

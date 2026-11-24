@@ -627,6 +627,11 @@ export function createMockBridge(): MockBridge {
         return result(clone(payload))
       }
 
+      case 'reveal_download': {
+        const { taskId } = args as unknown as { taskId: string }
+        if (!tasks.some(task => task.taskId === taskId)) throw new Error('下载任务不存在')
+        return result(undefined)
+      }
       case 'open_path': {
         const { path } = args as unknown as OpenPathArgs
         if (!path) throw new Error('路径为空，无法打开。')

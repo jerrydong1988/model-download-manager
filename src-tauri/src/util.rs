@@ -464,10 +464,10 @@ pub fn remove_file_if_exists(path: &Path) -> Result<(), String> {
     }
 }
 
-/// 删除下载临时文件（`.part` 与 `.part.json`），忽略错误。
-pub fn remove_task_temp_files(paths: &TaskPaths) {
-    let _ = remove_file_if_exists(&paths.part_path);
-    let _ = remove_file_if_exists(&paths.meta_path);
+/// 顺序删除临时文件，数据文件仍被占用时保留断点信息。
+pub fn remove_task_temp_files(paths: &TaskPaths) -> Result<(), String> {
+    remove_file_if_exists(&paths.part_path)?;
+    remove_file_if_exists(&paths.meta_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -723,6 +723,42 @@ pub fn build_http_client(settings: &Settings) -> Result<reqwest::Client, String>
 // 资源管理器
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "windows")]
+fn select_in_explorer(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::RPC_E_CHANGED_MODE;
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED,
+    };
+    use windows_sys::Win32::UI::Shell::{SHOpenFolderAndSelectItems, SHParseDisplayName};
+
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // The shell receives one native item ID, including filenames with commas and spaces.
+    // Balance our COM initialization and release the PIDL returned by SHParseDisplayName.
+    let result = unsafe {
+        let init = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32);
+        if init < 0 && init != RPC_E_CHANGED_MODE {
+            return Err(format!("无法初始化资源管理器：{init:#x}"));
+        }
+        let mut item = null_mut();
+        let mut hr = SHParseDisplayName(name.as_ptr(), null_mut(), &mut item, 0, null_mut());
+        if hr >= 0 {
+            hr = SHOpenFolderAndSelectItems(item, 0, null(), 0);
+        }
+        CoTaskMemFree(item.cast());
+        if init >= 0 {
+            CoUninitialize();
+        }
+        hr
+    };
+    if result < 0 {
+        Err(format!("资源管理器无法选中文件：{result:#x}"))
+    } else {
+        Ok(())
+    }
+}
+
 /// 在资源管理器中打开目录/文件；`reveal = true` 且路径为文件时选中该文件。
 pub fn open_in_explorer(path: &Path, reveal: bool) -> Result<(), String> {
     if !path.exists() {
@@ -731,14 +767,11 @@ pub fn open_in_explorer(path: &Path, reveal: bool) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let mut command = std::process::Command::new("explorer");
         if reveal && path.is_file() {
-            // explorer 对 /select, 的解析不遵循标准 argv 规则，路径需整体加引号。
-            command.arg(format!("/select,\"{}\"", path.display()));
-        } else {
-            command.arg(path.as_os_str());
+            return select_in_explorer(path);
         }
-        command
+        std::process::Command::new("explorer")
+            .arg(path)
             .spawn()
             .map_err(|e| format!("无法打开资源管理器：{e}"))?;
         return Ok(());

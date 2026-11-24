@@ -229,8 +229,9 @@ interface AppSnapshot {
 | 14 | `save_settings` | `{ settings: Settings }` | `Settings` | 校验/钳制后持久化并生效，返回生效值 |
 | 15 | `scan_library` | — | `LocalFile[]` | 递归扫描 `downloadDir` 与 `libraryRoots`（深度 ≤ 8，文件数 ≤ 20000），按修改时间倒序。跳过 `.part` / `.part.json` |
 | 15b | `list_partials` | — | `LocalFile[]` | 同一批扫描根中只返回残留 `.part` 文件，供清理取消后的临时数据。不返回已完成文件 |
-| 16 | `open_path` | `{ path, reveal }` | `()` | `reveal=true` 在资源管理器中选中文件；否则打开目录/文件 |
-| 17 | `delete_local_file` | `{ path, removeTask }` | `()` | 删除文件及其 `.part`/`.part.json`；`removeTask` 同时删除对应任务记录。**实现加严**：仅允许删除 `downloadDir` 内文件，且该文件不存在未终态任务 |
+| 16 | `open_path` | `{ path, reveal }` | `()` | 解析并校验扫描根内的目标。reveal 为 true 时选中文件。 |
+| 16b | `reveal_download` | `{ taskId }` | `()` | 根据后端任务记录选中该任务的最终文件或断点，支持单独选择的保存目录。 |
+| 17 | `delete_local_file` | `{ path, removeTask }` | `()` | 仅删除配置扫描根内且未被运行中任务占用的文件。可同时清理记录，文件清理错误会返回给调用方。 |
 | 18 | `test_connection` | `{ source }` | `string` | 发起一次真实请求（例如查询 `Qwen/Qwen2.5-0.5B-Instruct` 的文件列表），返回中文成功信息或 `Err` |
 | 19 | `get_default_download_dir` | — | `string` | |
 | 20 | `open_data_dir` | — | `()` | 打开应用数据目录 |
@@ -302,18 +303,11 @@ interface RevisionList {
 
 ### 5.2 断点续传
 
-1. 若 `.part` 存在，`resumeFrom = part.len()`。
-2. 请求带 `Range: bytes={resumeFrom}-`。
-3. 响应：
-   - `206`：解析 `Content-Range`，要求 `start == resumeFrom`，`total` 以 Content-Range 的 `*/total` 为准（覆盖列表中的 size）；不匹配则视为远端已变：删除 part 从头再来一次（最多 1 次）。
-   - **`200` 且带 `Content-Range`**（ModelScope 实测：`HTTP 200 + Content-Range: bytes 100-199/659 + Content-Length: 100`）：若 `start == resumeFrom` 且 total 合理 → 按续传成功处理（继续 append），不要截断。
-   - `200` 无 `Content-Range`：服务器不支持 Range/远端已变 → 截断 part 从头写。
-   - `416`：远端大小相同不能证明旧 `.part` 已填满数据；删除旧单流 part，重新获取响应体（最多一次）。
-   - `401/403`：不可重试，提示检查 Token/授权。
-   - `404`：不可重试，提示文件不存在。
-   - `429/5xx`/网络错误：按 `maxRetries` 指数退避重试（1s, 2s, 4s… 上限 30s）。
-4. 续传校验本次传输最新 etag/lastModified（包括重试前已获取的响应）并发送 If-Range；不一致则从头下载。缺失或损坏的元数据不视为可信断点，清理后重下。旧单流 part 达到完整长度时也从头重取，以覆盖 v0.2.0 预分配后崩溃留下的空洞；分段断点以有效 chunks 为准。
-5. 流式写入：`tokio::fs::File` + `AsyncWriteExt`，每写一块调用限速器。
+1. 仅复用与目标文件对应且可证明版本一致的断点。旧记录中的强 ETag 可以继续使用。日期作为校验器时，首次响应的 Date 至少晚于 Last-Modified 60 秒，客户端会记录该日期已通过检查。
+2. 发送带强校验器的 If-Range 请求并验证响应。206 和带 Content-Range 的 200 都要核对起点、范围、已知总长度和响应体长度。远端忽略 Range 或断点无法复用时，先清理旧数据再重新获取。416 不作为文件完整的证据。
+3. 分段下载从探测到各分块必须指向相同版本。缺少可靠校验器时使用单流完整响应，版本发生变化时停止使用旧分块。
+4. 明确的 Content-Length 为零允许完成空文件。长度未知时，只有具备预期 SHA-256 才将文件交付给队列做内容校验。否则保留断点并报告无法确认完整性。
+5. 401、403、404 为不可重试错误。429、5xx 和网络错误按照 maxRetries 指数退避。清理断点失败会中止重置并报告文件路径。
 
 ### 5.3 并发与限速
 

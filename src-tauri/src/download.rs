@@ -37,6 +37,9 @@ pub const BACKOFF_CAP: Duration = Duration::from_secs(30);
 pub struct PartMeta {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    /// Older sidecars have no evidence that a Last-Modified date was strong.
+    #[serde(default)]
+    pub strong_last_modified: bool,
     pub total: u64,
     pub repo_id: String,
     pub remote_path: String,
@@ -236,36 +239,72 @@ pub fn backoff_delay(retry_number: u32) -> Duration {
     Duration::from_secs(seconds).min(BACKOFF_CAP)
 }
 
-/// 续传前校验 `.part.json` 记录的 etag/lastModified 与响应头是否一致。
-///
-/// R1：必须至少有一对可比对的校验器（etag 或 last-modified）且全部一致才允许续传。
-/// 两侧都缺失时无法证明远端未变，返回 `false`，调用方应从头下载，而不是把新字节
-/// 拼接到可能属于旧版本的断点之后。
+/// Only a strong entity tag or a qualified HTTP date may accompany a byte range.
+pub(crate) fn if_range_value<'a>(
+    etag: Option<&'a str>,
+    modified: Option<&'a str>,
+) -> Option<&'a str> {
+    match etag {
+        Some(tag) => tag
+            .strip_prefix('"')?
+            .strip_suffix('"')?
+            .bytes()
+            .all(|c| c == b'!' || (0x23..=0x7e).contains(&c) || c >= 0x80)
+            .then_some(tag),
+        None => modified.filter(|stamp| httpdate::parse_http_date(stamp).is_ok()),
+    }
+}
+
+pub(crate) fn response_validators(
+    response: &reqwest::Response,
+) -> (Option<String>, Option<String>) {
+    use reqwest::header::{DATE, ETAG, LAST_MODIFIED};
+    let etag = header_text(response, ETAG);
+    // RFC 9110 §8.8.2.2. Without evidence of a shared clock, allow a conservative
+    // 60-second margin between the origin's Date and Last-Modified.
+    let modified = header_text(response, LAST_MODIFIED).filter(|stamp| {
+        let Some(date) =
+            header_text(response, DATE).and_then(|v| httpdate::parse_http_date(&v).ok())
+        else {
+            return false;
+        };
+        httpdate::parse_http_date(stamp)
+            .ok()
+            .and_then(|mtime| date.duration_since(mtime).ok())
+            .is_some_and(|age| age.as_secs() >= 60)
+    });
+    (etag, modified)
+}
+
+pub(crate) fn validators_match(
+    saved_etag: Option<&str>,
+    saved_modified: Option<&str>,
+    current_etag: Option<&str>,
+    current_modified: Option<&str>,
+) -> bool {
+    let Some(saved) = if_range_value(saved_etag, saved_modified) else {
+        return false;
+    };
+    if_range_value(current_etag, current_modified) == Some(saved)
+        && !matches!((saved_modified, current_modified), (Some(a), Some(b)) if a != b)
+}
+
+/// A legacy strong ETag is usable. A legacy date alone cannot certify the partial.
 pub fn resume_headers_match(
     meta: &PartMeta,
     response_etag: Option<&str>,
     response_last_modified: Option<&str>,
 ) -> bool {
-    fn non_empty(value: Option<&str>) -> Option<&str> {
-        value.filter(|text| !text.trim().is_empty())
-    }
-    let etag_pair = match (non_empty(meta.etag.as_deref()), non_empty(response_etag)) {
-        (Some(saved), Some(current)) => Some(saved == current),
-        _ => None,
-    };
-    let modified_pair = match (
-        non_empty(meta.last_modified.as_deref()),
-        non_empty(response_last_modified),
-    ) {
-        (Some(saved), Some(current)) => Some(saved == current),
-        _ => None,
-    };
-    // 任一可比对的校验器不一致 → 不匹配。
-    if etag_pair == Some(false) || modified_pair == Some(false) {
-        return false;
-    }
-    // 至少一对可比对且一致才算匹配；全部缺失时无法证明未变。
-    etag_pair == Some(true) || modified_pair == Some(true)
+    let saved_modified = meta
+        .last_modified
+        .as_deref()
+        .filter(|_| meta.strong_last_modified);
+    validators_match(
+        meta.etag.as_deref(),
+        saved_modified,
+        response_etag,
+        response_last_modified,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -383,19 +422,19 @@ fn save_part_meta(
     total: u64,
     etag: &Option<String>,
     last_modified: &Option<String>,
-) {
+) -> Result<(), DownloadError> {
     let meta = PartMeta {
         etag: etag.clone(),
         last_modified: last_modified.clone(),
+        strong_last_modified: last_modified.is_some(),
         total,
         repo_id: ctx.repo_id.clone(),
         remote_path: ctx.remote_path.clone(),
         chunk_size: None,
         chunks: None,
     };
-    if let Err(err) = util::atomic_write_json(&ctx.meta_path, &meta) {
-        eprintln!("保存断点信息失败：{err}");
-    }
+    util::atomic_write_json(&ctx.meta_path, &meta)
+        .map_err(|err| DownloadError::non_retryable(format!("保存断点信息失败：{err}")))
 }
 
 fn pause_outcome(
@@ -405,16 +444,16 @@ fn pause_outcome(
     total_size: u64,
     etag: Option<String>,
     last_modified: Option<String>,
-) -> TransferOutcome {
+) -> Result<TransferOutcome, DownloadError> {
     let downloaded = actual_downloaded(ctx, downloaded);
-    save_part_meta(ctx, total_size, &etag, &last_modified);
+    save_part_meta(ctx, total_size, &etag, &last_modified)?;
     util::emit_progress(sink, &ctx.task_id, downloaded, total_size, 0);
-    TransferOutcome::Paused {
+    Ok(TransferOutcome::Paused {
         downloaded,
         total_size,
         etag,
         last_modified,
-    }
+    })
 }
 
 fn cancel_outcome(
@@ -452,7 +491,24 @@ pub(crate) async fn remove_stale_file(path: &std::path::Path) -> Result<(), Down
     }
 }
 
-/// 完成：rename part → final，删除 part.json，发最终进度。
+pub(crate) async fn discard_partial(ctx: &TransferContext) -> Result<(), DownloadError> {
+    // Retain the identity sidecar if removal of the partial fails.
+    remove_stale_file(&ctx.part_path).await?;
+    remove_stale_file(&ctx.meta_path).await
+}
+
+pub(crate) async fn publish_partial(ctx: &TransferContext) -> Result<(), DownloadError> {
+    remove_stale_file(&ctx.meta_path).await?;
+    tokio::fs::rename(&ctx.part_path, &ctx.save_path)
+        .await
+        .map_err(|err| {
+            DownloadError::non_retryable(format!(
+                "无法完成文件重命名（文件可能被占用或权限不足）：{err}"
+            ))
+        })
+}
+
+/// Publish only after the last checkpoint has been removed.
 async fn finish_transfer(
     ctx: &TransferContext,
     downloaded: u64,
@@ -461,17 +517,7 @@ async fn finish_transfer(
     last_modified: Option<String>,
     progress: &mut ProgressReporter<'_>,
 ) -> Result<TransferOutcome, DownloadError> {
-    let total_size = if total_size == 0 {
-        downloaded
-    } else {
-        total_size
-    };
-    if let Err(err) = tokio::fs::rename(&ctx.part_path, &ctx.save_path).await {
-        return Err(DownloadError::non_retryable(format!(
-            "无法完成文件重命名（文件可能被占用或权限不足）：{err}"
-        )));
-    }
-    let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+    publish_partial(ctx).await?;
     progress.emit(downloaded, total_size, true);
     Ok(TransferOutcome::Completed {
         downloaded,
@@ -570,7 +616,11 @@ async fn stream_to_part(
         downloaded += chunk.len() as u64;
         progress.emit(downloaded, total_size, false);
     }
-    let _ = file.flush().await;
+    file.flush().await.map_err(|err| {
+        StreamStop::Error(DownloadError::non_retryable(format!(
+            "无法写入临时文件：{err}"
+        )))
+    })?;
     Ok(downloaded)
 }
 
@@ -598,14 +648,15 @@ async fn retry_or_stop(
     }
     match sleep_with_control(&ctx.control, backoff_delay(*retries_used)).await {
         WaitOutcome::Done => Ok(None),
-        WaitOutcome::Paused => Ok(Some(pause_outcome(
+        WaitOutcome::Paused => pause_outcome(
             ctx,
             sink,
             downloaded,
             total_size,
             etag.clone(),
             last_modified.clone(),
-        ))),
+        )
+        .map(Some),
         WaitOutcome::Cancelled => Ok(Some(cancel_outcome(ctx, sink, downloaded, total_size))),
     }
 }
@@ -623,11 +674,12 @@ async fn run_stream_attempt(
     response: reqwest::Response,
     append: bool,
     offset: u64,
-    total_size: u64,
+    expected_size: Option<u64>,
     etag: &Option<String>,
     last_modified: &Option<String>,
     progress: &mut ProgressReporter<'_>,
 ) -> Result<Option<TransferOutcome>, DownloadError> {
+    let total_size = expected_size.unwrap_or(0);
     match stream_to_part(response, ctx, append, offset, total_size, progress).await {
         Ok(written) => {
             finish_or_retry(
@@ -635,21 +687,22 @@ async fn run_stream_attempt(
                 sink,
                 retries_used,
                 written,
-                total_size,
+                expected_size,
                 etag,
                 last_modified,
                 progress,
             )
             .await
         }
-        Err(StreamStop::Pause) => Ok(Some(pause_outcome(
+        Err(StreamStop::Pause) => pause_outcome(
             ctx,
             sink,
             offset,
             total_size,
             etag.clone(),
             last_modified.clone(),
-        ))),
+        )
+        .map(Some),
         Err(StreamStop::Cancel) => Ok(Some(cancel_outcome(ctx, sink, offset, total_size))),
         Err(StreamStop::Error(err)) => {
             if !err.retryable {
@@ -707,49 +760,26 @@ pub async fn transfer_auto(
     prepare_target(&ctx).await?;
     discard_untracked_part(&ctx).await?;
     let stored_meta: PartMeta = util::read_json_opt(&ctx.meta_path).unwrap_or_default();
-    if stored_meta.is_segmented() {
-        prepare_target(&ctx).await?;
-        return match crate::segmented::attempt(&ctx, sink).await? {
-            crate::segmented::Attempt::Done(outcome) => Ok(outcome),
-            crate::segmented::Attempt::Fallback => {
-                // 远端已不支持 Range：删除预分配 part 后按单流从头下载。
-                let _ = tokio::fs::remove_file(&ctx.part_path).await;
-                let _ = tokio::fs::remove_file(&ctx.meta_path).await;
-                transfer(ctx, sink).await
-            }
-        };
-    }
-
-    // 多连接条件：开启 >1 且 total 已知且大于一个分块。
     let chunk_size = ctx
         .chunk_size_override
         .unwrap_or(crate::segmented::CHUNK_SIZE);
-    let want_segmented = ctx.connections > 1 && ctx.total_size > chunk_size;
-    if !want_segmented {
-        return transfer(ctx, sink).await;
-    }
-    // 最终文件已存在且大小一致 → 交给单流引擎走快速完成分支。
-    if let Ok(metadata) = tokio::fs::metadata(&ctx.save_path).await {
-        if metadata.is_file() && metadata.len() == ctx.total_size {
-            return transfer(ctx, sink).await;
-        }
-    }
-
-    prepare_target(&ctx).await?;
-    match crate::segmented::attempt(&ctx, sink).await? {
-        crate::segmented::Attempt::Done(outcome) => Ok(outcome),
-        crate::segmented::Attempt::Fallback => {
-            // 探测不支持 Range：清理可能产生的分段元数据后回退单流。
-            if util::read_json_opt::<PartMeta>(&ctx.meta_path)
-                .map(|meta| meta.is_segmented())
-                .unwrap_or(false)
+    if stored_meta.is_segmented() || (ctx.connections > 1 && ctx.total_size > chunk_size) {
+        let final_exists = ctx.total_size > 0
+            && tokio::fs::metadata(&ctx.save_path)
+                .await
+                .is_ok_and(|m| m.is_file() && m.len() == ctx.total_size);
+        if !final_exists {
+            if let crate::segmented::Attempt::Done(outcome) =
+                crate::segmented::attempt(&ctx, sink).await?
             {
-                let _ = tokio::fs::remove_file(&ctx.part_path).await;
-                let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+                return Ok(outcome);
             }
-            transfer(ctx, sink).await
+        }
+        if stored_meta.is_segmented() {
+            discard_partial(&ctx).await?;
         }
     }
+    transfer(ctx, sink).await
 }
 
 /// A bare/preallocated part is not proof of downloaded bytes. Only resume a
@@ -758,21 +788,8 @@ async fn discard_untracked_part(ctx: &TransferContext) -> Result<(), DownloadErr
     let tracked = util::read_json_opt::<PartMeta>(&ctx.meta_path)
         .map(|meta| meta.repo_id == ctx.repo_id && meta.remote_path == ctx.remote_path)
         .unwrap_or(false);
-    if !tracked && tokio::fs::try_exists(&ctx.part_path).await.unwrap_or(false) {
-        tokio::fs::remove_file(&ctx.part_path)
-            .await
-            .map_err(|error| {
-                DownloadError::non_retryable(format!("无法清理缺少有效断点信息的临时文件：{error}"))
-            })?;
-        match tokio::fs::remove_file(&ctx.meta_path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(DownloadError::non_retryable(format!(
-                    "无法清理损坏的断点信息：{error}"
-                )))
-            }
-        }
+    if !tracked {
+        discard_partial(ctx).await?;
     }
     Ok(())
 }
@@ -816,28 +833,12 @@ pub async fn transfer(
     } else {
         stored_meta.total
     };
-    let mut etag = stored_meta
-        .etag
-        .clone()
-        .filter(|value| !value.is_empty())
-        .or_else(|| ctx.etag.clone());
+    let mut etag = stored_meta.etag.clone();
     let mut last_modified = stored_meta
         .last_modified
-        .clone()
-        .filter(|value| !value.is_empty())
-        .or_else(|| ctx.last_modified.clone());
-
+        .filter(|_| stored_meta.strong_last_modified);
     let mut downloaded = part_length(&ctx.part_path).await;
     let mut stale_part_reset_used = false;
-
-    // P1-3：旧单流 part 长度达到远端大小（也可能是旧版预分配崩溃遗留）→ 丢弃重下，
-    // 不能直接 rename 完成，否则多余字节会被当作有效内容。
-    if total_size > 0 && downloaded >= total_size {
-        let _ = tokio::fs::remove_file(&ctx.part_path).await;
-        let _ = tokio::fs::remove_file(&ctx.meta_path).await;
-        downloaded = 0;
-        stale_part_reset_used = true;
-    }
 
     let mut progress = ProgressReporter::new(sink, &ctx.task_id, downloaded);
     progress.emit(downloaded, total_size, true);
@@ -850,17 +851,17 @@ pub async fn transfer(
             return Ok(cancel_outcome(ctx, sink, downloaded, total_size));
         }
         if ctx.control.is_paused() {
-            return Ok(pause_outcome(
-                ctx,
-                sink,
-                downloaded,
-                total_size,
-                etag,
-                last_modified,
-            ));
+            return pause_outcome(ctx, sink, downloaded, total_size, etag, last_modified);
         }
 
         downloaded = part_length(&ctx.part_path).await;
+        if downloaded > 0 && if_range_value(etag.as_deref(), last_modified.as_deref()).is_none() {
+            discard_partial(ctx).await?;
+            downloaded = 0;
+            total_size = ctx.total_size;
+            etag = None;
+            last_modified = None;
+        }
         if total_size > 0 && downloaded >= total_size {
             // part 达到完整长度但没有完整响应确认：仅允许丢弃重下一次，避免异常情况下无限循环。
             if stale_part_reset_used {
@@ -869,8 +870,7 @@ pub async fn transfer(
                 ));
             }
             stale_part_reset_used = true;
-            let _ = tokio::fs::remove_file(&ctx.part_path).await;
-            let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+            discard_partial(ctx).await?;
             downloaded = 0;
             progress.emit(0, total_size, true);
             continue 'transfer;
@@ -886,7 +886,7 @@ pub async fn transfer(
         }
         if downloaded > 0 {
             request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
-            if let Some(validator) = etag.as_deref().or(last_modified.as_deref()) {
+            if let Some(validator) = if_range_value(etag.as_deref(), last_modified.as_deref()) {
                 request = request.header(reqwest::header::IF_RANGE, validator);
             }
         }
@@ -896,16 +896,7 @@ pub async fn transfer(
             Err(WaitOutcome::Cancelled) => {
                 return Ok(cancel_outcome(ctx, sink, downloaded, total_size))
             }
-            Err(_) => {
-                return Ok(pause_outcome(
-                    ctx,
-                    sink,
-                    downloaded,
-                    total_size,
-                    etag,
-                    last_modified,
-                ))
-            }
+            Err(_) => return pause_outcome(ctx, sink, downloaded, total_size, etag, last_modified),
             Ok(Err(err)) => {
                 let reason = util::redact_urls(&format!("网络请求失败（{err}）"));
                 if let Some(outcome) = retry_or_stop(
@@ -927,28 +918,36 @@ pub async fn transfer(
         };
 
         let status = response.status();
-        let response_etag = header_text(&response, reqwest::header::ETAG);
-        let response_last_modified = header_text(&response, reqwest::header::LAST_MODIFIED);
+        let (response_etag, response_last_modified) = response_validators(&response);
 
         match status.as_u16() {
             200 | 206 => {
                 let content_range = header_text(&response, reqwest::header::CONTENT_RANGE)
                     .and_then(|value| parse_content_range(&value));
-                let range_start = content_range.and_then(|range| range.start);
-                // 标准 206 视为续传；此外 ModelScope 实测对 Range 请求返回
-                // `200 + Content-Range: bytes N-M/T`（非标准），只要起点一致也按续传处理。
-                let resume_semantics =
-                    range_start == Some(downloaded) && (status.as_u16() == 206 || downloaded > 0);
+                let partial_response = status.as_u16() == 206
+                    || response
+                        .headers()
+                        .contains_key(reqwest::header::CONTENT_RANGE);
+                let resume_semantics = partial_response
+                    && content_range.is_some_and(|range| {
+                        let Some(end) = range.end else { return false };
+                        range.start == Some(downloaded)
+                            && range.total.map_or(true, |total| {
+                                end < total
+                                    && (downloaded == 0 || total_size == 0 || total == total_size)
+                            })
+                            && response.content_length().map_or(true, |length| {
+                                end.checked_sub(downloaded).and_then(|n| n.checked_add(1))
+                                    == Some(length)
+                            })
+                    });
 
                 if resume_semantics {
                     // 续传前校验 etag/lastModified，不一致说明远端已变 → 删除 part 从头下载（最多 1 次）。
                     if downloaded > 0
-                        && !resume_headers_match(
-                            &PartMeta {
-                                etag: etag.clone(),
-                                last_modified: last_modified.clone(),
-                                ..PartMeta::default()
-                            },
+                        && !validators_match(
+                            etag.as_deref(),
+                            last_modified.as_deref(),
                             response_etag.as_deref(),
                             response_last_modified.as_deref(),
                         )
@@ -959,8 +958,7 @@ pub async fn transfer(
                             ));
                         }
                         remote_reset_used = true;
-                        let _ = tokio::fs::remove_file(&ctx.part_path).await;
-                        let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+                        discard_partial(ctx).await?;
                         downloaded = 0;
                         total_size = ctx.total_size;
                         etag = None;
@@ -972,17 +970,17 @@ pub async fn transfer(
                     if let Some(range_total) = content_range.and_then(|range| range.total) {
                         total_size = range_total;
                     }
-                    etag = response_etag.clone().or(etag);
-                    last_modified = response_last_modified.clone().or(last_modified);
-                    save_part_meta(ctx, total_size, &etag, &last_modified);
+                    etag = response_etag;
+                    last_modified = response_last_modified;
+                    save_part_meta(ctx, total_size, &etag, &last_modified)?;
                     match run_stream_attempt(
                         ctx,
                         sink,
                         &mut retries_used,
                         response,
-                        true,
+                        downloaded > 0,
                         downloaded,
-                        total_size,
+                        (total_size > 0).then_some(total_size),
                         &etag,
                         &last_modified,
                         &mut progress,
@@ -992,7 +990,7 @@ pub async fn transfer(
                         Some(outcome) => return Ok(outcome),
                         None => continue 'transfer,
                     }
-                } else if status.as_u16() == 206 {
+                } else if partial_response {
                     // 206 但起点不一致：远端文件已变，删除 part 从头再来一次（最多 1 次）。
                     if remote_reset_used {
                         return Err(DownloadError::non_retryable(
@@ -1000,31 +998,27 @@ pub async fn transfer(
                         ));
                     }
                     remote_reset_used = true;
-                    remove_stale_file(&ctx.part_path).await?;
-                    remove_stale_file(&ctx.meta_path).await?;
+                    discard_partial(ctx).await?;
                     downloaded = 0;
                     total_size = ctx.total_size;
                     progress.emit(0, total_size, true);
                     continue 'transfer;
                 } else {
                     // 200 且无有效 Content-Range：服务器不支持 Range（或远端已变）→ 截断 part 从头写。
-                    // Remove the old prefix before associating it with new response validators.
+                    // A full response starts a new representation.
                     if downloaded > 0 {
-                        tokio::fs::remove_file(&ctx.part_path)
-                            .await
-                            .map_err(|error| {
-                                DownloadError::non_retryable(format!("无法重置临时文件：{error}"))
-                            })?;
+                        discard_partial(ctx).await?;
                     }
-                    if let Some(length) = response.content_length() {
-                        if length > 0 {
-                            total_size = length;
-                        }
-                    }
+                    let expected_size = match response.content_length() {
+                        Some(0) if ctx.total_size > 0 => Some(ctx.total_size),
+                        Some(length) => Some(length),
+                        None => (ctx.total_size > 0).then_some(ctx.total_size),
+                    };
+                    total_size = expected_size.unwrap_or(0);
                     downloaded = 0;
-                    etag = response_etag.clone().or(etag);
-                    last_modified = response_last_modified.clone().or(last_modified);
-                    save_part_meta(ctx, total_size, &etag, &last_modified);
+                    etag = response_etag;
+                    last_modified = response_last_modified;
+                    save_part_meta(ctx, total_size, &etag, &last_modified)?;
                     progress.emit(0, total_size, true);
                     match run_stream_attempt(
                         ctx,
@@ -1033,7 +1027,7 @@ pub async fn transfer(
                         response,
                         false,
                         0,
-                        total_size,
+                        expected_size,
                         &etag,
                         &last_modified,
                         &mut progress,
@@ -1054,8 +1048,7 @@ pub async fn transfer(
                     ));
                 }
                 remote_reset_used = true;
-                remove_stale_file(&ctx.part_path).await?;
-                remove_stale_file(&ctx.meta_path).await?;
+                discard_partial(ctx).await?;
                 downloaded = 0;
                 total_size = ctx.total_size;
                 progress.emit(0, total_size, true);
@@ -1097,17 +1090,6 @@ pub async fn transfer(
     }
 }
 
-/// 长度未知但存在 SHA-256 时：视为传输完成，把文件交给后续内容校验判定。
-async fn finish_transfer_unverified(
-    ctx: &TransferContext,
-    written: u64,
-    etag: Option<String>,
-    last_modified: Option<String>,
-    progress: &mut ProgressReporter<'_>,
-) -> Result<TransferOutcome, DownloadError> {
-    finish_transfer(ctx, written, written, etag, last_modified, progress).await
-}
-
 /// 流式写入完成后：足够长则完成，不足则按可重试中断处理。
 #[allow(clippy::too_many_arguments)]
 async fn finish_or_retry(
@@ -1115,38 +1097,28 @@ async fn finish_or_retry(
     sink: &dyn EventSink,
     retries_used: &mut u32,
     written: u64,
-    total_size: u64,
+    expected_size: Option<u64>,
     etag: &Option<String>,
     last_modified: &Option<String>,
     progress: &mut ProgressReporter<'_>,
 ) -> Result<Option<TransferOutcome>, DownloadError> {
-    if total_size > 0 && written > total_size {
+    let total_size = match expected_size {
+        Some(total) => total,
+        None if ctx.sha256_known => written,
+        None => {
+            save_part_meta(ctx, 0, etag, last_modified)?;
+            return Err(DownloadError::non_retryable(
+                "服务器未提供文件长度，且没有可用的 SHA-256 校验，无法确认下载完整，已保留临时文件。请改用提供文件大小或校验值的下载源后重试",
+            ));
+        }
+    };
+    if written > total_size {
         return Err(DownloadError::non_retryable(
             "响应体超过远端声明的文件大小，已停止下载",
         ));
     }
-    let complete = total_size > 0 && written == total_size;
-    // R2：长度未知时，流正常结束无法证明文件完整（连接可能在任意字节被截断）。
-    // 仅当已知 SHA-256 时才交由后续内容校验判定；否则保留断点并报错，不标记为成功。
-    if !complete && total_size == 0 {
-        if ctx.sha256_known {
-            return finish_transfer_unverified(
-                ctx,
-                written,
-                etag.clone(),
-                last_modified.clone(),
-                progress,
-            )
-            .await
-            .map(Some);
-        }
-        save_part_meta(ctx, total_size, etag, last_modified);
-        return Err(DownloadError::non_retryable(
-            "服务器未提供文件长度，且没有可用的 SHA-256 校验，无法确认下载完整，已保留临时文件。请改用提供文件大小或校验值的下载源后重试",
-        ));
-    }
-    if complete {
-        let outcome = finish_transfer(
+    if written == total_size {
+        return finish_transfer(
             ctx,
             written,
             total_size,
@@ -1154,11 +1126,11 @@ async fn finish_or_retry(
             last_modified.clone(),
             progress,
         )
-        .await?;
-        return Ok(Some(outcome));
+        .await
+        .map(Some);
     }
     let reason = format!("连接中断，文件未下载完整（已下载 {written}/{total_size} 字节）");
-    save_part_meta(ctx, total_size, etag, last_modified);
+    save_part_meta(ctx, total_size, etag, last_modified)?;
     retry_or_stop(
         ctx,
         sink,
@@ -1242,6 +1214,7 @@ mod tests {
     fn resume_headers_validation() {
         let mut meta = PartMeta {
             etag: Some("\"abc\"".to_string()),
+            strong_last_modified: true,
             last_modified: Some("Wed, 21 Oct 2015 07:28:00 GMT".to_string()),
             total: 100,
             ..Default::default()
@@ -1280,21 +1253,5 @@ mod tests {
         assert!(remove_stale_file(&existing).await.is_ok());
         assert!(!existing.exists());
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn unknown_length_completion_requires_hash() {
-        // R2：长度未知时，仅当存在 SHA-256 才允许以"流结束"完成。
-        let may_complete = |written: u64, total: u64, sha256_known: bool| {
-            if total > 0 {
-                written == total
-            } else {
-                sha256_known
-            }
-        };
-        assert!(may_complete(10, 10, false));
-        assert!(!may_complete(7, 10, false));
-        assert!(!may_complete(7, 0, false));
-        assert!(may_complete(7, 0, true));
     }
 }

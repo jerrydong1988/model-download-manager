@@ -374,7 +374,7 @@ fn start_task(app: &tauri::AppHandle, state: &Arc<AppState>, task: DownloadTask)
         on_retry: Some(on_retry),
         connections: settings.connections_per_file.clamp(1, 8),
         chunk_size_override: None,
-        sha256_known: task.sha256.is_some(),
+        sha256_known: normalized_sha(task.sha256.as_deref()).is_some(),
     };
 
     let app = app.clone();
@@ -511,21 +511,9 @@ fn finish_task(
             total_size,
         }) => {
             let updated = state.transition_task(task_id, &expected, |task| {
-                task.status = TaskStatus::Cancelled;
-                task.downloaded = downloaded;
                 task.total_size = total_size;
-                task.speed = 0;
-                task.error = None;
-                task.completed_at = Some(util::now_millis());
+                cancel_partial(task, downloaded, delete_partial);
             });
-            if delete_partial {
-                let paths = util::TaskPaths {
-                    final_path: PathBuf::from(&current.save_path),
-                    part_path: PathBuf::from(&current.temp_path),
-                    meta_path: util::with_suffix(Path::new(&current.temp_path), ".json"),
-                };
-                util::remove_task_temp_files(&paths);
-            }
             if let TransitionOutcome::Updated(task) = updated {
                 util::emit_task_updated(sink, &task);
                 #[cfg(not(test))]
@@ -824,6 +812,29 @@ fn check_retry_destination(task: &DownloadTask) -> Result<(), String> {
     Ok(())
 }
 
+fn cancel_partial(task: &mut DownloadTask, downloaded: u64, delete_partial: bool) {
+    task.status = TaskStatus::Cancelled;
+    task.completed_at = Some(util::now_millis());
+    task.speed = 0;
+    task.error = None;
+    task.downloaded = downloaded;
+    if delete_partial {
+        let paths = util::TaskPaths {
+            final_path: PathBuf::from(&task.save_path),
+            part_path: PathBuf::from(&task.temp_path),
+            meta_path: util::with_suffix(Path::new(&task.temp_path), ".json"),
+        };
+        match util::remove_task_temp_files(&paths) {
+            Ok(()) => task.downloaded = 0,
+            Err(error) => {
+                task.status = TaskStatus::Error;
+                task.error = Some(error);
+                task.downloaded = read_part_progress(&paths.part_path, &paths.meta_path).downloaded;
+            }
+        }
+    }
+}
+
 /// 命令 6：继续单个任务（paused/error/cancelled → queued，CAS）。
 pub fn resume_task(
     state: &Arc<AppState>,
@@ -936,22 +947,10 @@ pub fn cancel_task(
                 task_id,
                 &[TaskStatus::Queued, TaskStatus::Paused, TaskStatus::Error],
                 |task| {
-                    task.status = TaskStatus::Cancelled;
-                    task.downloaded = part_length;
-                    task.speed = 0;
-                    task.error = None;
-                    task.completed_at = Some(util::now_millis());
+                    cancel_partial(task, part_length, delete_partial);
                 },
             ) {
                 TransitionOutcome::Updated(updated) => {
-                    if delete_partial {
-                        let paths = util::TaskPaths {
-                            final_path: PathBuf::from(&updated.save_path),
-                            part_path: PathBuf::from(&updated.temp_path),
-                            meta_path: util::with_suffix(Path::new(&updated.temp_path), ".json"),
-                        };
-                        util::remove_task_temp_files(&paths);
-                    }
                     state.remove_control(task_id);
                     util::emit_task_updated(sink, &updated);
                     #[cfg(not(test))]
@@ -962,7 +961,7 @@ pub fn cancel_task(
                         crate::batch_notice::BatchOutcome::Observe,
                     );
                     state.mark_dirty(true);
-                    Ok(())
+                    updated.error.map_or(Ok(()), Err)
                 }
                 // 并发完成/取消：丢弃本次取消请求。
                 TransitionOutcome::Conflict(_) | TransitionOutcome::Missing => Ok(()),
@@ -1006,15 +1005,7 @@ pub fn remove_tasks(
     sink: &dyn EventSink,
     task_ids: &[String],
 ) -> Result<(), String> {
-    let snapshot = state.tasks_snapshot();
-    for task_id in task_ids {
-        if let Some(task) = snapshot.iter().find(|task| &task.task_id == task_id) {
-            if !task.status.is_terminal() {
-                return Err(format!("任务「{}」尚未结束，无法删除记录", task.file_name));
-            }
-        }
-    }
-    let removed = state.remove_tasks(task_ids);
+    let removed = state.remove_tasks(task_ids)?;
     if removed.is_empty() {
         return Ok(());
     }
@@ -1644,5 +1635,32 @@ mod tests {
         assert_eq!(probe(&file, false).source, Some(Source::Modelscope));
         assert_eq!(state.tasks_snapshot().len(), 1);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancelling_with_unremovable_partial_reports_error_and_retains_the_sidecar() {
+        let (state, dir) = sample_state(true);
+        let sink = RecordingSink::default();
+        let root = dir.join("models");
+        let task = start_downloads(&state, vec![sample_request(&root, "a.bin", 3)], &sink)
+            .unwrap()
+            .remove(0);
+        let partial = Path::new(&task.temp_path);
+        std::fs::create_dir(partial).unwrap();
+        let sidecar = util::with_suffix(partial, ".json");
+        std::fs::write(&sidecar, b"{}").unwrap();
+        assert!(cancel_task(&state, &sink, &task.task_id, true).is_err());
+        let failed = state.get_task(&task.task_id).unwrap();
+        assert_eq!(failed.status, TaskStatus::Error);
+        assert!(failed.error.unwrap().contains("删除"));
+        assert!(sidecar.exists());
+        std::fs::remove_dir(partial).unwrap();
+        cancel_task(&state, &sink, &task.task_id, true).unwrap();
+        assert_eq!(
+            state.get_task(&task.task_id).unwrap().status,
+            TaskStatus::Cancelled
+        );
+        assert!(!sidecar.exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

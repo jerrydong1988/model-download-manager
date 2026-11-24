@@ -14,7 +14,7 @@ import type { DownloadTask, TaskStatus } from '../types'
 import {
   cancelDownload,
   clearFinished,
-  openPath,
+  revealDownload,
   pauseAll,
   pauseDownload,
   removeTasks,
@@ -233,8 +233,8 @@ export default function DownloadsPage() {
     }, '已删除任务记录')
   }
   const handleOpenLocation = (task: DownloadTask) => {
-    const target = task.status === 'completed' ? task.savePath : task.tempPath
-    void openPath(target, true).catch((err: unknown) => {
+
+    void revealDownload(task.taskId).catch((err: unknown) => {
       pushToast('error', '无法打开所在位置', toErrorText(err))
     })
   }

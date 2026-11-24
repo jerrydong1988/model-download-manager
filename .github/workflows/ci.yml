@@ -63,7 +63,7 @@ jobs:
           }
       - name: Backend regression tests
         working-directory: src-tauri
-        run: cargo test --locked --no-fail-fast
+        run: cargo test --locked --all-targets --no-fail-fast
       # v0.5.0：updater 签名。同仓库运行有 secrets 时生成签名产物；
       # fork PR 无私钥时用 --config 关闭 createUpdaterArtifacts，保证 CI 可构建。
       - name: Resolve updater signing switch

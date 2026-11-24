@@ -20,15 +20,18 @@ use tokio::fs::OpenOptions;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::download::{
-    backoff_delay, header_text, parse_content_range, part_length, sleep_with_control,
-    status_is_retryable, with_control, DownloadError, PartMeta, TransferContext, TransferOutcome,
-    WaitOutcome,
+    backoff_delay, discard_partial, header_text, if_range_value, parse_content_range, part_length,
+    publish_partial, response_validators, resume_headers_match, sleep_with_control,
+    status_is_retryable, validators_match, with_control, DownloadError, PartMeta, TransferContext,
+    TransferOutcome, WaitOutcome,
 };
 use crate::sources;
 use crate::util::{self, EventSink};
 
 /// 分段大小：固定 16 MiB（最后一块可短）。
 pub const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+// Larger representations can still use the single-stream engine.
+const MAX_CHECKPOINT_CHUNKS: u64 = 1 << 20;
 
 /// 进度事件最小间隔（与单流一致 ≤4 次/秒）。
 const PROGRESS_INTERVAL_MS: u64 = 250;
@@ -88,29 +91,27 @@ pub(crate) async fn attempt(
 
     let total = probe.total;
     let chunk_size = ctx.chunk_size_override.unwrap_or(CHUNK_SIZE).max(1);
-    let nchunks = ((total + chunk_size - 1) / chunk_size) as usize;
-    if nchunks <= 1 {
-        // 只有一个分块：交给原单流引擎（若已有分段元数据需先清理，避免预分配文件干扰）。
-        if stored.is_segmented() {
-            let _ = tokio::fs::remove_file(&ctx.part_path).await;
-            let _ = tokio::fs::remove_file(&ctx.meta_path).await;
-        }
+    let nchunks = total.div_ceil(chunk_size);
+    if !(2..=MAX_CHECKPOINT_CHUNKS).contains(&nchunks)
+        || if_range_value(probe.etag.as_deref(), probe.last_modified.as_deref()).is_none()
+    {
+        // Separate range requests need a common representation even on a fresh download.
+        discard_partial(ctx).await?;
         return Ok(Attempt::Fallback);
     }
 
-    // 2. Remote changes invalidate both legacy and segmented partial data.
+    let nchunks = nchunks as usize;
     let mut stored = stored;
     let mut part_len = part_len;
-    let size_changed = stored.total > 0 && stored.total != total;
-    let metadata_changed = mismatch(stored.etag.as_deref(), probe.etag.as_deref())
-        || mismatch(
-            stored.last_modified.as_deref(),
-            probe.last_modified.as_deref(),
-        );
-    let remote_changed = size_changed || metadata_changed;
-    if remote_changed {
-        let _ = tokio::fs::remove_file(&ctx.part_path).await;
-        let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+    if part_len > 0
+        && ((stored.total > 0 && stored.total != total)
+            || !resume_headers_match(
+                &stored,
+                probe.etag.as_deref(),
+                probe.last_modified.as_deref(),
+            ))
+    {
+        discard_partial(ctx).await?;
         stored = PartMeta::default();
         part_len = 0;
     }
@@ -131,8 +132,7 @@ pub(crate) async fn attempt(
         }
     } else if stored.is_segmented() {
         // 分段元数据与当前参数不匹配（预分配文件不可信）→ 丢弃重下。
-        let _ = tokio::fs::remove_file(&ctx.part_path).await;
-        let _ = tokio::fs::remove_file(&ctx.meta_path).await;
+        discard_partial(ctx).await?;
         Segments::new(total, chunk_size)
     } else if part_len > 0 && part_len < total {
         // 旧单流连续前缀 → 转换为分段进度，保留断点。
@@ -157,6 +157,7 @@ pub(crate) async fn attempt(
     {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .open(&ctx.part_path)
             .await
@@ -174,27 +175,10 @@ pub(crate) async fn attempt(
 
     let mut progress_throttle = ProgressThrottle::new(&ctx.task_id);
     if segments.all_complete() {
-        let downloaded = segments.downloaded();
-        save_segmented_meta(
-            ctx,
-            total,
-            chunk_size,
-            &segments.chunks,
-            &etag,
-            &last_modified,
-        )?;
-        util::emit_progress(sink, &ctx.task_id, downloaded, total, 0);
-        return finish_files(ctx, sink, total, etag, last_modified).map(Attempt::Done);
+        return finish_files(ctx, sink, total, etag, last_modified)
+            .await
+            .map(Attempt::Done);
     }
-
-    save_segmented_meta(
-        ctx,
-        total,
-        chunk_size,
-        &segments.chunks,
-        &etag,
-        &last_modified,
-    )?;
     util::emit_progress(sink, &ctx.task_id, segments.downloaded(), total, 0);
     progress_throttle.reset();
 
@@ -216,6 +200,7 @@ pub(crate) async fn attempt(
         }),
         control: ctx.control.clone(),
         fatal: Mutex::new(None),
+        stop_workers: tokio::sync::watch::channel(false).0,
         retry_counter: AtomicU64::new(0),
         progress: Mutex::new(ProgressThrottle::new(&ctx.task_id)),
     });
@@ -301,8 +286,14 @@ pub(crate) async fn attempt(
         )?;
         return Err(err);
     }
+    if ends.iter().any(|end| matches!(end, WorkerEnd::Fallback)) {
+        discard_partial(ctx).await?;
+        return Ok(Attempt::Fallback);
+    }
     if complete {
-        return finish_files(ctx, sink, total, etag, last_modified).map(Attempt::Done);
+        return finish_files(ctx, sink, total, etag, last_modified)
+            .await
+            .map(Attempt::Done);
     }
     save_segmented_meta(
         ctx,
@@ -367,8 +358,7 @@ async fn probe_remote(ctx: &TransferContext) -> Result<ProbeOutcome, DownloadErr
         let status = response.status();
         let content_range = header_text(&response, reqwest::header::CONTENT_RANGE)
             .and_then(|value| parse_content_range(&value));
-        let etag = header_text(&response, reqwest::header::ETAG);
-        let last_modified = header_text(&response, reqwest::header::LAST_MODIFIED);
+        let (etag, last_modified) = response_validators(&response);
 
         match status.as_u16() {
             200 | 206 => {
@@ -427,7 +417,7 @@ pub(crate) struct Segments {
 
 impl Segments {
     pub(crate) fn new(total: u64, chunk_size: u64) -> Self {
-        let nchunks = ((total + chunk_size - 1) / chunk_size) as usize;
+        let nchunks = total.div_ceil(chunk_size) as usize;
         Self {
             total,
             chunk_size,
@@ -483,11 +473,24 @@ struct Shared {
     state: Mutex<SegState>,
     control: Arc<crate::state::TaskControl>,
     fatal: Mutex<Option<DownloadError>>,
+    stop_workers: tokio::sync::watch::Sender<bool>,
     retry_counter: AtomicU64,
     progress: Mutex<ProgressThrottle>,
 }
 
 impl Shared {
+    /// Stop waiting for network IO on fallback; every worker closes its file before reset.
+    async fn while_segmented<F: std::future::Future>(
+        &self,
+        work: F,
+    ) -> Result<F::Output, ChunkEnd> {
+        let mut stop = self.stop_workers.subscribe();
+        tokio::select! {
+            biased;
+            _ = stop.wait_for(|stopped| *stopped) => Err(self.peek_fatal().map_or(ChunkEnd::Fallback, ChunkEnd::Fatal)),
+            result = work => Ok(result),
+        }
+    }
     fn claim(&self) -> Option<Job> {
         let mut state = self
             .state
@@ -550,6 +553,8 @@ impl Shared {
         if fatal.is_none() {
             *fatal = Some(error);
         }
+        drop(fatal);
+        self.stop_workers.send_replace(true);
     }
 
     fn peek_fatal(&self) -> Option<DownloadError> {
@@ -634,6 +639,7 @@ impl ProgressThrottle {
 // ---------------------------------------------------------------------------
 
 enum WorkerEnd {
+    Fallback,
     Done,
     Paused,
     Cancelled,
@@ -641,6 +647,7 @@ enum WorkerEnd {
 }
 
 enum ChunkEnd {
+    Fallback,
     Paused,
     Cancelled,
     Fatal(DownloadError),
@@ -676,6 +683,7 @@ async fn run_worker(
         };
         match fetch_chunk(ctx, sink, &plan, &shared, &mut file, job).await {
             Ok(()) => {}
+            Err(ChunkEnd::Fallback) => return WorkerEnd::Fallback,
             Err(ChunkEnd::Paused) => return WorkerEnd::Paused,
             Err(ChunkEnd::Cancelled) => return WorkerEnd::Cancelled,
             Err(ChunkEnd::Fatal(error)) => {
@@ -715,14 +723,18 @@ async fn fetch_chunk(
             .get(&plan.url)
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .header(reqwest::header::RANGE, range);
-        if let Some(validator) = plan.etag.as_deref().or(plan.last_modified.as_deref()) {
+        if let Some(validator) = if_range_value(plan.etag.as_deref(), plan.last_modified.as_deref())
+        {
             request = request.header(reqwest::header::IF_RANGE, validator);
         }
         if let Some(token) = plan.auth_token.as_deref() {
             request = request.bearer_auth(token);
         }
 
-        let response = match with_control(&ctx.control, request.send()).await {
+        let response = match shared
+            .while_segmented(with_control(&ctx.control, request.send()))
+            .await?
+        {
             Ok(Ok(response)) => response,
             Err(WaitOutcome::Cancelled) => return Err(ChunkEnd::Cancelled),
             Err(_) => return Err(ChunkEnd::Paused),
@@ -740,12 +752,16 @@ async fn fetch_chunk(
             .and_then(|value| parse_content_range(&value));
         match status.as_u16() {
             200 | 206 => {
-                if mismatch(
+                let (etag, modified) = response_validators(&response);
+                if if_range_value(etag.as_deref(), modified.as_deref()).is_none() {
+                    shared.stop_workers.send_replace(true);
+                    return Err(ChunkEnd::Fallback);
+                }
+                if !validators_match(
                     plan.etag.as_deref(),
-                    header_text(&response, reqwest::header::ETAG).as_deref(),
-                ) || mismatch(
                     plan.last_modified.as_deref(),
-                    header_text(&response, reqwest::header::LAST_MODIFIED).as_deref(),
+                    etag.as_deref(),
+                    modified.as_deref(),
                 ) {
                     return Err(ChunkEnd::Fatal(DownloadError::non_retryable(
                         "远端文件版本在下载期间变化，请重试任务",
@@ -832,7 +848,10 @@ async fn stream_chunk(
     let mut written = start_offset;
     let mut stream = response.bytes_stream();
     loop {
-        let item = match with_control(&ctx.control, stream.next()).await {
+        let item = match shared
+            .while_segmented(with_control(&ctx.control, stream.next()))
+            .await?
+        {
             Ok(Some(item)) => item,
             Ok(None) => break,
             Err(reason) => {
@@ -869,8 +888,12 @@ async fn stream_chunk(
                 "分块响应长度超出预期",
             )));
         }
-        if let Err(reason) =
-            with_control(&ctx.control, ctx.limiter.acquire(chunk.len() as u64)).await
+        if let Err(reason) = shared
+            .while_segmented(with_control(
+                &ctx.control,
+                ctx.limiter.acquire(chunk.len() as u64),
+            ))
+            .await?
         {
             let _ = file.flush().await;
             return Err(if matches!(reason, WaitOutcome::Cancelled) {
@@ -919,10 +942,14 @@ async fn retry_or_end(
     }
     *retries += 1;
     shared.bump_retry(ctx);
-    match sleep_with_control(&ctx.control, backoff_delay(*retries)).await {
-        WaitOutcome::Done => None,
-        WaitOutcome::Paused => Some(ChunkEnd::Paused),
-        WaitOutcome::Cancelled => Some(ChunkEnd::Cancelled),
+    match shared
+        .while_segmented(sleep_with_control(&ctx.control, backoff_delay(*retries)))
+        .await
+    {
+        Err(stop) => Some(stop),
+        Ok(WaitOutcome::Done) => None,
+        Ok(WaitOutcome::Paused) => Some(ChunkEnd::Paused),
+        Ok(WaitOutcome::Cancelled) => Some(ChunkEnd::Cancelled),
     }
 }
 
@@ -957,16 +984,6 @@ impl InitialProgress {
     }
 }
 
-fn mismatch(saved: Option<&str>, current: Option<&str>) -> bool {
-    match (
-        saved.filter(|value| !value.trim().is_empty()),
-        current.filter(|value| !value.trim().is_empty()),
-    ) {
-        (Some(saved), Some(current)) => saved != current,
-        _ => false,
-    }
-}
-
 fn save_segmented_meta(
     ctx: &TransferContext,
     total: u64,
@@ -978,6 +995,7 @@ fn save_segmented_meta(
     let meta = PartMeta {
         etag: etag.clone(),
         last_modified: last_modified.clone(),
+        strong_last_modified: last_modified.is_some(),
         total,
         repo_id: ctx.repo_id.clone(),
         remote_path: ctx.remote_path.clone(),
@@ -1001,6 +1019,7 @@ fn save_segmented_meta_owned(
     let meta = PartMeta {
         etag: etag.clone(),
         last_modified: last_modified.clone(),
+        strong_last_modified: last_modified.is_some(),
         total,
         repo_id: repo_id.to_string(),
         remote_path: remote_path.to_string(),
@@ -1042,19 +1061,14 @@ fn spawn_meta_saver(
 }
 
 /// 完成：删除 `.part.json`，`part → final` 原子 rename，发最终进度。
-fn finish_files(
+async fn finish_files(
     ctx: &TransferContext,
     sink: &dyn EventSink,
     total: u64,
     etag: Option<String>,
     last_modified: Option<String>,
 ) -> Result<TransferOutcome, DownloadError> {
-    if let Err(err) = std::fs::rename(&ctx.part_path, &ctx.save_path) {
-        return Err(DownloadError::non_retryable(format!(
-            "无法完成文件重命名（文件可能被占用或权限不足）：{err}"
-        )));
-    }
-    let _ = std::fs::remove_file(&ctx.meta_path);
+    publish_partial(ctx).await?;
     util::emit_progress(sink, &ctx.task_id, total, total, 0);
     Ok(TransferOutcome::Completed {
         downloaded: total,

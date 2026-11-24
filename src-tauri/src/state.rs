@@ -347,10 +347,16 @@ impl AppState {
     }
 
     /// 删除任务记录，返回实际删除的 taskId 列表。
-    pub fn remove_tasks(&self, task_ids: &[String]) -> Vec<String> {
+    pub fn remove_tasks(&self, task_ids: &[String]) -> Result<Vec<String>, String> {
         let mut removed = Vec::new();
         {
             let mut guard = self.tasks_guard();
+            if let Some(task) = guard
+                .iter()
+                .find(|task| task_ids.contains(&task.task_id) && !task.is_terminal())
+            {
+                return Err(format!("任务「{}」尚未结束，无法删除记录", task.file_name));
+            }
             guard.retain(|task| {
                 let matched = task_ids.iter().any(|id| id == &task.task_id);
                 if matched {
@@ -364,7 +370,46 @@ impl AppState {
         if !removed.is_empty() {
             self.mark_dirty(false);
         }
-        removed
+        Ok(removed)
+    }
+
+    /// Coordinate deletion with enqueue, scheduling and retry so a writer cannot
+    /// acquire the path between the ownership check and the filesystem operation.
+    pub(crate) fn delete_library_file(
+        &self,
+        target: &std::path::Path,
+        remove_task: bool,
+    ) -> Result<Vec<String>, String> {
+        use std::path::Path;
+        let _enqueue = self.enqueue_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let key = util::task_path_key(target);
+        let mut tasks = self.tasks_guard();
+        if let Some(task) = tasks.iter().find(|task| {
+            (!task.is_terminal() || task.verify_status == crate::models::VerifyStatus::Pending)
+                && util::task_path_keys(Path::new(&task.save_path)).contains(&key)
+        }) {
+            return Err(format!("任务「{}」尚未结束，无法删除文件", task.file_name));
+        }
+        let ids: Vec<String> = tasks
+            .iter()
+            .filter(|task| remove_task && util::task_path_key(Path::new(&task.save_path)) == key)
+            .map(|task| task.task_id.clone())
+            .collect();
+        if target
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("part"))
+        {
+            util::remove_file_if_exists(&util::with_suffix(target, ".json"))?;
+        } else {
+            util::remove_file_if_exists(&util::with_suffix(target, ".part"))?;
+            util::remove_file_if_exists(&util::with_suffix(target, ".part.json"))?;
+        }
+        std::fs::remove_file(target).map_err(|err| format!("删除文件失败：{err}"))?;
+        if !ids.is_empty() {
+            tasks.retain(|task| !ids.contains(&task.task_id));
+            self.mark_dirty(true);
+        }
+        Ok(ids)
     }
 
     /// 下一个可启动的 queued 任务（按加入时间 FIFO）。
@@ -549,6 +594,36 @@ mod tests {
         settings.auto_resume = true;
         let state = Arc::new(AppState::new(settings, dir.join("appdata")));
         (state, dir)
+    }
+
+    #[test]
+    fn library_delete_preserves_active_and_verifying_files() {
+        let (state, dir) = sample_state();
+        let target = dir.join("owned.gguf");
+        std::fs::write(&target, b"abc").unwrap();
+        let mut task = sample_task(TaskStatus::Active);
+        task.save_path = target.to_string_lossy().into_owned();
+        task.temp_path = util::with_suffix(&target, ".part")
+            .to_string_lossy()
+            .into_owned();
+        let id = task.task_id.clone();
+        state.insert_tasks(vec![task]);
+        assert!(state.delete_library_file(&target, true).is_err());
+        state.update_task(&id, |task| {
+            task.status = TaskStatus::Completed;
+            task.verify_status = crate::models::VerifyStatus::Pending;
+        });
+        assert!(state.delete_library_file(&target, true).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"abc");
+        state.update_task(&id, |task| {
+            task.verify_status = crate::models::VerifyStatus::Verified
+        });
+        assert_eq!(
+            state.delete_library_file(&target, true).unwrap(),
+            vec![id.clone()]
+        );
+        assert!(!target.exists() && state.get_task(&id).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn sample_task(status: TaskStatus) -> DownloadTask {

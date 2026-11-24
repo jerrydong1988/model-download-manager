@@ -169,7 +169,7 @@ fn schedule_content_verify(job: VerifyJob) {
     #[cfg(not(test))]
     let on_error = (job.state.clone(), job.task_id.clone(), job.notify_success);
     let work = move || {
-        let outcome = crate::integrity::check_file(Path::new(&job.save_path), &job.expected);
+        let outcome = job.state.digests.check_file(Path::new(&job.save_path), &job.expected);
         let Some(task) = apply_verify_outcome(&job.state, &job.task_id, outcome) else {
             return;
         };
@@ -575,13 +575,14 @@ pub fn start_downloads(
     requests: Vec<DownloadRequest>,
     sink: &dyn EventSink,
 ) -> Result<Vec<DownloadTask>, String> {
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
+    crate::local_files::verify_mirror_requests(state, &requests);
     let _enqueue = state
         .enqueue_lock
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if requests.is_empty() {
-        return Ok(Vec::new());
-    }
     let mut created: Vec<DownloadTask> = Vec::new();
     let mut now = util::now_millis();
     let mut skipped_errors: Vec<String> = Vec::new();
@@ -680,13 +681,27 @@ fn build_task_from_request(
         return Ok(None);
     }
 
-    if state
-        .tasks_snapshot()
+    let tasks = state.tasks_snapshot();
+    let mut conflicts = tasks
         .iter()
         .chain(created.iter())
-        .any(|task| util::task_paths_conflict(Path::new(&task.save_path), &paths.final_path))
-    {
-        return Err("目标文件已属于另一个来源或 revision 的任务，请选择其他下载目录，或先清理冲突的任务记录".to_string());
+        .filter(|task| util::task_paths_conflict(Path::new(&task.save_path), &paths.final_path));
+    let metadata = std::fs::metadata(&paths.final_path).ok();
+    if let Some(owner) = conflicts.next() {
+        use crate::local_files::{compare_content, reusable_owner, LocalStatus};
+        if conflicts.next().is_none()
+            && reusable_owner(owner)
+            && util::task_path_key(Path::new(&owner.save_path)) == util::task_path_key(&paths.final_path)
+            && metadata.as_ref().is_some_and(|meta| {
+                compare_content(&state.digests, &paths.final_path, meta, request.size, request.sha256.as_deref(), false) == LocalStatus::Verified
+            })
+        {
+            return Ok(None);
+        }
+        return Err(format!("{} 的目标路径已有 {} 任务，请刷新文件列表核对本地文件，或更改下载目录", remote_path, owner.source));
+    }
+    if metadata.as_ref().is_some_and(|meta| request.size > 0 && meta.len() != request.size) {
+        return Err(format!("{remote_path} 的本地文件大小与远端不同，请更改下载目录或移走原文件"));
     }
 
     // v0.2.0：分段任务的 .part 已预分配为 total 长度，用元数据 chunks 计算已下载量。
@@ -698,9 +713,7 @@ fn build_task_from_request(
     };
 
     // 最终文件已存在且大小一致 → 直接标记完成。
-    let existing_length = std::fs::metadata(&paths.final_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
+    let existing_length = metadata.map(|meta| meta.len()).unwrap_or(0);
     let sha256 = normalized_sha(request.sha256.as_deref());
     let already_completed = total_size > 0 && existing_length == total_size;
     let verify_status = if already_completed && sha256.is_some() {
@@ -1541,5 +1554,94 @@ mod tests {
         assert_eq!(state.get_task(&stored.task_id).unwrap().status, TaskStatus::Queued);
         assert_eq!(std::fs::read(&backup).unwrap(), b"abc");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn completed_mirrors_share_verified_content_without_sharing_writers() {
+        use crate::local_files::{inspect, LocalStatus};
+        use crate::models::{FileKind, RepoFile, Source};
+
+        let (state, dir) = sample_state(true);
+        let sink = RecordingSink::default();
+        let root = dir.join("models");
+        let target = root.join("org/model/a.bin");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"abc").unwrap();
+        let hash = crate::integrity::sha256_file(&target).unwrap();
+        let mut original = sample_request(&root, "a.bin", 3);
+        original.sha256 = Some(hash.clone());
+        start_downloads(&state, vec![original.clone()], &sink).unwrap();
+        let file = RepoFile {
+            name: "a.bin".into(), path: "a.bin".into(), kind: FileKind::Other, size: 3, sha256: Some(hash),
+        };
+        let probe = |file: &RepoFile, dir: &Path, revision: &str, verify| {
+            inspect(&state, Source::Modelscope, "org/model", revision, dir.to_str().unwrap(), std::slice::from_ref(file), verify)
+        };
+        let found = probe(&file, &root, "master", false);
+        assert_eq!(found[0].status, LocalStatus::Verified);
+        assert_eq!(found[0].source, Some(Source::Huggingface));
+        assert!(probe(&file, &dir.join("elsewhere"), "master", false).is_empty());
+        assert!(!dir.join("elsewhere").exists(), "浏览不能创建目录");
+        assert!(probe(&file, &root, "dev", false).is_empty());
+        let no_hash = RepoFile { sha256: None, ..file.clone() };
+        assert_eq!(probe(&no_hash, &root, "master", false)[0].status, LocalStatus::Present);
+        let different = RepoFile { sha256: Some("0".repeat(64)), ..file.clone() };
+        assert_eq!(probe(&different, &root, "master", false)[0].status, LocalStatus::Different);
+
+        let mirror = DownloadRequest { source: Source::Modelscope, ..original };
+        assert!(start_downloads(&state, vec![mirror.clone()], &sink).unwrap().is_empty());
+        let mut new_file = mirror.clone();
+        new_file.remote_path = "b.bin".into();
+        let created = start_downloads(&state, vec![mirror.clone(), new_file], &sink).unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].remote_path, "b.bin");
+        assert_eq!(state.tasks_snapshot().len(), 2);
+        let partial = RepoFile { path: "a.bin.part".into(), ..file.clone() };
+        assert_eq!(probe(&partial, &root, "master", false)[0].status, LocalStatus::Occupied);
+
+        std::fs::write(&target, b"xyz").unwrap();
+        let changed = std::fs::File::options().write(true).open(&target).unwrap();
+        changed.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000)).unwrap();
+        drop(changed);
+        assert_eq!(probe(&file, &root, "master", false)[0].status, LocalStatus::NeedsHash);
+        assert_eq!(probe(&file, &root, "master", true)[0].status, LocalStatus::Different);
+        assert!(start_downloads(&state, vec![mirror], &sink).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"xyz");
+        std::fs::remove_file(&target).unwrap();
+        assert_eq!(probe(&file, &root, "master", false)[0].status, LocalStatus::Missing);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_tasks_and_untracked_files_can_be_recognized_without_remote_transfer() {
+        use crate::local_files::{inspect, LocalStatus};
+        use crate::models::{FileKind, RepoFile, Source};
+        let (state, dir) = sample_state(true);
+        let root = dir.join("models");
+        let path = root.join("org/model/a.bin");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"abc").unwrap();
+        let file = RepoFile {
+            path: "a.bin".into(), name: "a.bin".into(), kind: FileKind::Other, size: 3,
+            sha256: Some(crate::integrity::sha256_file(&path).unwrap()),
+        };
+        let probe = |file: &RepoFile, verify| {
+            inspect(&state, Source::Huggingface, "org/model", "main", root.to_str().unwrap(),
+                std::slice::from_ref(file), verify).pop().unwrap()
+        };
+        let untracked = probe(&file, false);
+        assert_eq!(untracked.status, LocalStatus::NeedsHash);
+        assert_eq!(untracked.source, None);
+        assert_eq!(probe(&RepoFile { size: 4, ..file.clone() }, false).status, LocalStatus::Different);
+
+        let sink = RecordingSink::default();
+        let original = DownloadRequest { source: Source::Modelscope, ..sample_request(&root, "a.bin", 3) };
+        start_downloads(&state, vec![original], &sink).unwrap();
+        let request = DownloadRequest { sha256: file.sha256.clone(), ..sample_request(&root, "a.bin", 3) };
+        assert!(start_downloads(&state, vec![request], &sink).unwrap().is_empty());
+        assert_eq!(probe(&file, false).status, LocalStatus::Verified);
+        assert_eq!(probe(&file, false).source, Some(Source::Modelscope));
+        assert_eq!(state.tasks_snapshot().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

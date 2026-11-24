@@ -338,17 +338,14 @@ pub fn task_path_key(path: &Path) -> String {
     }
 }
 
-pub fn task_paths_conflict(left: &Path, right: &Path) -> bool {
-    let paths = |path: &Path| {
-        [
-            path.to_path_buf(),
-            with_suffix(path, ".part"),
-            with_suffix(path, ".part.json"),
-        ]
+pub fn task_path_keys(path: &Path) -> [String; 3] {
+    [path.to_path_buf(), with_suffix(path, ".part"), with_suffix(path, ".part.json")]
         .map(|path| task_path_key(&path))
-    };
-    let left = paths(left);
-    let right = paths(right);
+}
+
+pub fn task_paths_conflict(left: &Path, right: &Path) -> bool {
+    let left = task_path_keys(left);
+    let right = task_path_keys(right);
     left.iter().any(|key| right.contains(key))
 }
 
@@ -736,7 +733,8 @@ pub fn open_in_explorer(path: &Path, reveal: bool) -> Result<(), String> {
     {
         let mut command = std::process::Command::new("explorer");
         if reveal && path.is_file() {
-            command.arg(format!("/select,{}", path.display()));
+            // explorer 对 /select, 的解析不遵循标准 argv 规则，路径需整体加引号。
+            command.arg(format!("/select,\"{}\"", path.display()));
         } else {
             command.arg(path.as_os_str());
         }

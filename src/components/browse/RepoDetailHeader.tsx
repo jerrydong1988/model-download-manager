@@ -7,6 +7,7 @@ import {
   ShieldAlert,
 } from '../icons'
 import type { RepoDetail, RepoFile, Source } from '../../types'
+import type { FileStateInfo } from '../../lib/repoFileState'
 import { formatBytes, formatCount, formatIsoDate } from '../../lib/format'
 import { SOURCE_LABEL } from '../../lib/labels'
 import { Badge, FileKindBadge, SourceBadge } from '../ui/Badge'
@@ -98,12 +99,6 @@ export function RepoDetailHeader({ detail, source, revisionSelector }: RepoDetai
       ) : null}
     </div>
   )
-}
-
-export interface FileStateInfo {
-  label: string
-  tone: 'emerald' | 'blue' | 'amber' | 'red' | 'slate'
-  disabled: boolean
 }
 
 export interface FileRowProps {
@@ -200,7 +195,7 @@ export function FileTableRow({ file, selected, state, onToggle }: FileRowProps) 
       </span>
       <span className="flex justify-end">
         {state ? (
-          <Badge tone={state.tone}>{state.label}</Badge>
+          <Badge tone={state.tone} title={state.title}>{state.label}</Badge>
         ) : (
           <span className="text-secondary text-fg-disabled">—</span>
         )}

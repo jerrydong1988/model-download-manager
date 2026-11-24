@@ -40,3 +40,7 @@ settings.json
 tasks.json
 *.part
 *.part.json
+
+# local tooling caches (not part of the project)
+.npm-cache/
+.cc-safety-net/

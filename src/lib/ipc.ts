@@ -17,7 +17,9 @@ import type {
   DownloadRequest,
   DownloadTask,
   ListRevisionsArgs,
+  LocalRepoMatch,
   RepoDetail,
+  RepoFile,
   RepoSearchPage,
   RevisionList,
   SaveSettingsArgs,
@@ -94,6 +96,14 @@ export function getRepoDetail(
   revision?: string,
 ): Promise<RepoDetail> {
   return invokeCmd<RepoDetail>('get_repo_detail', { source, repoId, revision })
+}
+
+export function inspectRepoFiles(
+  repo: RepoDetail, saveDir: string, files: RepoFile[], verify = false,
+): Promise<LocalRepoMatch[]> {
+  return invokeCmd('inspect_repo_files', {
+    source: repo.source, repoId: repo.id, revision: repo.revision, saveDir, files, verify,
+  })
 }
 
 /** v0.2.0：仓库可下载 revision 列表（分支/标签；失败时由调用方降级为自定义输入）。 */

@@ -38,7 +38,7 @@ import {
 import { defaultRevisionFor, formatBytes } from '../../lib/format'
 import { isTerminalStatus } from '../../lib/labels'
 import { taskMatchesDestination } from '../../lib/downloadPaths'
-import { remoteIsNewer } from '../../lib/libraryCatalog'
+import { repoFileState } from '../../lib/repoFileState'
 import { useAppStore } from '../../store/appStore'
 import { cx } from '../../lib/cx'
 import {
@@ -50,7 +50,8 @@ import { ErrorBanner } from '../ui/ErrorBanner'
 import { PathText } from '../ui/PathText'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Skeleton } from '../ui/Skeleton'
-import { RepoDetailHeader, type FileStateInfo } from './RepoDetailHeader'
+import { RepoDetailHeader } from './RepoDetailHeader'
+import { useLocalRepoFiles } from './useLocalRepoFiles'
 import { RevisionSelector } from './RevisionSelector'
 import { FileTable } from './FileTable'
 
@@ -109,7 +110,7 @@ export function RepoDetailView({
   const [detail, setDetail] = useState<RepoDetail | null>(null)
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [error, setError] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [manualSelection, setSelected] = useState<Set<string> | null>(null)
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [fileQuery, setFileQuery] = useState('')
   const [saveDir, setSaveDir] = useState('')
@@ -168,7 +169,7 @@ export function RepoDetailView({
           }
         }
         // 多个量化档时只勾选推荐档和配套投影器；否则仍勾选全部权重与投影器。
-        setSelected(new Set(defaultSelectedPaths(result.files, occupied)))
+        setSelected(null)
         return true
       } catch (err) {
         if (seq !== detailRequestSeq.current) return false
@@ -260,27 +261,17 @@ export function RepoDetailView({
     return map
   }, [repo.id, repo.source, tasks, revision, saveDir])
 
+  const local = useLocalRepoFiles(detail, saveDir, tasks)
   const resolveState = useCallback(
-    (file: RepoFile): FileStateInfo | null => {
-      const task = taskMap.get(file.path)
-      if (!task) return null
-      if (task.status === 'completed') {
-        if (remoteIsNewer(file, task)) {
-          return { label: '可更新', tone: 'amber', disabled: true }
-        }
-        return { label: '已下载', tone: 'emerald', disabled: true }
-      }
-      if (task.status === 'error' || task.status === 'cancelled') {
-        return {
-          label: task.status === 'error' ? '下载失败' : '已取消',
-          tone: task.status === 'error' ? 'red' : 'amber',
-          disabled: false,
-        }
-      }
-      return { label: '队列中', tone: 'blue', disabled: true }
-    },
-    [taskMap],
+    (file: RepoFile) => repoFileState(file, repo.source, taskMap.get(file.path), local.matches.get(file.path)),
+    [repo.source, taskMap, local.matches],
   )
+  const occupied = useCallback((file: RepoFile) => Boolean(resolveState(file)?.disabled), [resolveState])
+  const selected = useMemo(() => {
+    if (!detail || local.inspecting) return new Set<string>()
+    if (!manualSelection) return new Set(defaultSelectedPaths(detail.files, occupied))
+    return new Set(detail.files.filter(file => manualSelection.has(file.path) && !occupied(file)).map(file => file.path))
+  }, [detail, local.inspecting, manualSelection, occupied])
 
   const kindCounts = useMemo(() => {
     const counts: Record<FileKind, number> = {
@@ -313,11 +304,6 @@ export function RepoDetailView({
       unknownSizeCount: picked.filter((file) => file.size <= 0).length,
     }
   }, [detail, selected])
-
-  const occupied = useCallback(
-    (file: RepoFile) => Boolean(resolveState(file)?.disabled),
-    [resolveState],
-  )
 
   const quantOptions = useMemo(() => (detail ? quantChoices(detail.files) : []), [detail])
   const shardOptions = useMemo(
@@ -373,23 +359,23 @@ export function RepoDetailView({
 
   const toggleFile = useCallback((path: string) => {
     setSelected((previous) => {
-      const next = new Set(previous)
+      const next = new Set(previous ?? selected)
       if (next.has(path)) next.delete(path)
       else next.add(path)
       return next
     })
-  }, [])
+  }, [selected])
 
   const toggleMany = useCallback((paths: string[], checked: boolean) => {
     setSelected((previous) => {
-      const next = new Set(previous)
+      const next = new Set(previous ?? selected)
       for (const path of paths) {
         if (checked) next.add(path)
         else next.delete(path)
       }
       return next
     })
-  }, [])
+  }, [selected])
 
   const handleToggleAll = useCallback(
     (checked: boolean) => {
@@ -599,7 +585,7 @@ export function RepoDetailView({
                         aria-pressed={active}
                         title={`只选择 ${option.id} 及配套投影器`}
                         onClick={() =>
-                          applyPaths(paths, `${option.id} 的文件都已在队列或已下载`)
+                          applyPaths(paths, `当前目录没有可选择的 ${option.id} 文件`)
                         }
                       >
                         {option.id}
@@ -625,7 +611,7 @@ export function RepoDetailView({
                         variant={active ? 'secondary' : 'ghost'}
                         aria-pressed={active}
                         title={`选择 ${group.label} 的全部分片`}
-                        onClick={() => applyPaths(paths, `${group.label} 的分片都已在队列或已下载`)}
+                        onClick={() => applyPaths(paths, `当前目录没有可选择的 ${group.label} 分片`)}
                       >
                         {group.label}
                         <span className="text-fg-muted">{group.fileCount} 片</span>
@@ -720,6 +706,9 @@ export function RepoDetailView({
             />
 
             <div data-action-shelf className={cx('selection-shelf flex shrink-0 flex-col gap-3 border-t border-line px-4 py-4', selection.files.length > 0 ? 'bg-primary-soft' : 'bg-surface-2')}>
+              {local.error ? (
+                <p role="status" className="text-meta text-danger">本地文件检查失败，请刷新文件列表。{local.error}</p>
+              ) : null}
               {disk?.level === 'short' ? (
                 <p role="status" className="text-meta text-danger">
                   {disk.volume} 可用 {formatBytes(disk.freeBytes)}，已选 {formatBytes(disk.neededBytes)}，还差{' '}

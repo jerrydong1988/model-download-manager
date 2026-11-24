@@ -165,6 +165,7 @@ async fn main() {
             on_retry: None,
             connections: settings.connections_per_file.clamp(1, 8),
             chunk_size_override: None,
+            sha256_known: false,
         };
         match transfer(context, &NoopSink).await {
             Ok(outcome) => {

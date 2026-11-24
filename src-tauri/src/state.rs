@@ -103,6 +103,7 @@ impl TaskControl {
 
 /// 全局应用状态（`tauri::Builder::manage` 注册）。
 pub struct AppState {
+    pub digests: crate::integrity::DigestCache,
     /// Serialize enqueue validation and insertion, including physical output-path ownership.
     pub enqueue_lock: Mutex<()>,
     /// 应用数据目录（settings.json / tasks.json 所在）。
@@ -137,6 +138,7 @@ impl AppState {
         });
         let limiter = Arc::new(BandwidthLimiter::new(settings.bandwidth_limit));
         Self {
+            digests: crate::integrity::DigestCache::open(&data_dir),
             enqueue_lock: Mutex::new(()),
             data_dir,
             settings: RwLock::new(settings),

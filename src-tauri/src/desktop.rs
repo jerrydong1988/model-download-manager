@@ -105,6 +105,7 @@ pub fn run() {
             commands::get_snapshot,
             commands::search_repos,
             commands::get_repo_detail,
+            commands::inspect_repo_files,
             commands::start_downloads,
             commands::pause_download,
             commands::resume_download,

@@ -12,12 +12,30 @@ import {
 } from '../../src/lib/fileSelection.ts'
 import { parseRepoLink } from '../../src/lib/repoLink.ts'
 import { verifyPresentation } from '../../src/lib/verifyLabel.ts'
+import { repoFileState } from '../../src/lib/repoFileState.ts'
 import type { DownloadTask, RepoFile } from '../../src/types.ts'
 
 function file(path: string, kind: RepoFile['kind'], size = 10): RepoFile {
   const name = path.split('/').pop() ?? path
   return { path, name, size, kind }
 }
+
+test('镜像的本地文件状态和推荐、量化选择共用同一依据', () => {
+  const local = file('model-Q4_K_M.gguf', 'weight')
+  const available = file('model-Q8_0.gguf', 'weight')
+  const files = [local, available]
+  const match = { path: local.path, source: 'huggingface' as const }
+  for (const status of ['verified', 'needsHash', 'present', 'different', 'occupied', 'missing', 'unreadable'] as const) {
+    const row = repoFileState(local, 'modelscope', undefined, { ...match, status })
+    assert.equal(row?.disabled, true)
+    assert.equal(row?.label === '已下载 · HF', status === 'verified')
+    const occupied = (item: RepoFile) => item.path === local.path && !!row?.disabled
+    assert.deepEqual(defaultSelectedPaths(files, occupied), [available.path])
+    assert.deepEqual(pathsForQuant(files, 'Q4_K_M', occupied), [])
+  }
+  assert.equal(repoFileState(local, 'huggingface', undefined, { ...match, source: 'modelscope', status: 'verified' })?.label, '已下载 · MS')
+  assert.equal(repoFileState(available, 'modelscope'), null)
+})
 
 test('quant and shard names parse without swallowing model names', () => {
   assert.equal(quantOf('Qwen2.5-7B-Instruct-Q4_K_M.gguf'), 'Q4_K_M')

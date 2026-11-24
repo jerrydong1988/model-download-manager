@@ -215,7 +215,8 @@ interface AppSnapshot {
 | 2 | `search_repos` | `{ source, query, page, limit, cursor? }` | `RepoSearchPage` | `page` 从 1 起；`limit` 1..=50 默认 20；HF 用 `cursor` 连续翻页，ModelScope 用 `page` |
 | 3 | `get_repo_detail` | `{ source, repoId, revision? }` | `RepoDetail` | 文件列表；revision 缺省按来源默认 |
 | 3b | `list_revisions` | `{ source, repoId }` | `RevisionList { branches: string[], tags: string[] }` | v0.2.0：HF 用 `/api/models/{repo}/refs` 返回分支/标签；ModelScope 尽力返回（失败给空数组），两源都允许 UI 自定义 revision 文本 |
-| 4 | `start_downloads` | `{ requests: DownloadRequest[] }` | `DownloadTask[]` | 去重（同 source+repo+remotePath+最终路径已在队列中则复用），返回新建的任务 |
+| 3c | `inspect_repo_files` | `{ source, repoId, revision, saveDir, files: RepoFile[], verify: boolean }` | `{ path, status, source: Source 或 null }[]` | 检查所选目录中的目标文件。先按路径、大小和本地摘要缓存检查。对 `needsHash` 项传 `verify=true` 可读取文件计算摘要。无文件且无占用时省略该项。 |
+| 4 | `start_downloads` | `{ requests: DownloadRequest[] }` | `DownloadTask[]` | 返回本次新建的任务。跳过已有的同源任务，也跳过同一目标路径上已核对内容一致的跨源文件。 |
 | 5 | `pause_download` | `{ taskId }` | `()` | active→pausing→paused；queued→paused |
 | 6 | `resume_download` | `{ taskId }` | `()` | paused/error/cancelled→queued |
 | 7 | `pause_all` | — | `()` | 所有 active/queued 暂停 |
@@ -292,6 +293,7 @@ interface RevisionList {
   - **默认 revision（HF `main` / MS `master`）**：`{saveDir}/{repoId 的安全形式}/{remotePath 的安全形式}`（与 v0.1.x 完全一致，保证历史任务/本地库路径不变）。
   - **非默认 revision（v0.2.1 新任务）**：`{saveDir}/.mdm-revisions/{revision UTF-8 字节的十六进制编码}/{repoId}/{remotePath}`；revision 允许合法 `/` 分段，整体编码以区分大小写、目录与分支。已有任务保留原保存路径。
   - 新任务入队校验与插入串行化，最终路径、临时文件和元数据均不得与已有不同任务发生物理路径冲突；启动时也拒绝旧队列的冲突记录。
+  - 不同来源写入相同最终路径时，可复用已完成且本地 SHA-256 与当前远端一致的文件。此时跳过入队，保留原下载记录。仓库页区分已核对一致、仅本地存在、内容不同、任务占用和文件缺失。
   - `repoId` 中的 `/` 保留为目录分隔（即 `org/model` → `org/model`）。
 - 临时文件：`{finalPath}.part`；元数据：`{finalPath}.part.json`（保存 etag/lastModified/total/repoId/remotePath；v0.2.0 分段下载额外保存 chunkSize/chunks）。
 - 路径安全：拒绝 `..`、绝对路径、Windows 盘符、UNC 前缀、以分隔符开头的 `remotePath`；拒绝已存在的符号链接/junction（下载前检查每级父目录与目标文件）。

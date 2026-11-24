@@ -98,6 +98,12 @@ export interface RepoFile {
   sha256?: string
 }
 
+export interface LocalRepoMatch {
+  path: string
+  status: 'verified' | 'needsHash' | 'present' | 'different' | 'occupied' | 'missing' | 'unreadable'
+  source: Source | null
+}
+
 /** 仓库详情（命令 3） */
 export interface RepoDetail {
   id: string

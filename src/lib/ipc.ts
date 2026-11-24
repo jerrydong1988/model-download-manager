@@ -171,6 +171,10 @@ export function listPartials(): Promise<import('../types').LocalFile[]> {
   return invokeCmd<import('../types').LocalFile[]>('list_partials')
 }
 
+export function revealDownload(taskId: string): Promise<void> {
+  return invokeCmd<void>('reveal_download', { taskId })
+}
+
 export function openPath(path: string, reveal: boolean): Promise<void> {
   return invokeCmd<void>('open_path', { path, reveal })
 }

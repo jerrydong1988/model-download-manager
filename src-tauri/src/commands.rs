@@ -270,90 +270,22 @@ pub fn open_path(
     reveal: bool,
 ) -> Result<(), String> {
     let target = PathBuf::from(&path);
-    ensure_within_scan_roots(state.inner(), &target)?;
-    util::open_in_explorer(&target, reveal)
+    let resolved =
+        crate::library::resolve_scan_path(&target, &library_scan_roots(&state.current_settings()))?;
+    util::open_in_explorer(&resolved, reveal)
 }
 
-/// 确认路径（解析符号链接后）位于已配置扫描根（downloadDir ∪ libraryRoots）之内。
-/// 供 `open_path` 使用，防止前端把任意路径交给系统打开器。
-fn ensure_within_scan_roots(state: &Arc<AppState>, target: &std::path::Path) -> Result<(), String> {
-    let target_canon = target
-        .canonicalize()
-        .map_err(|err| format!("无法解析路径：{err}"))?;
-    let settings = state.current_settings();
-    if !path_is_within_roots(&target_canon, &library_scan_roots(&settings)) {
-        return Err("只能打开已配置扫描根目录内的路径".to_string());
-    }
-    Ok(())
-}
-
-/// 纯函数：`target`（已规范化）是否位于任一根目录之下。根目录无法解析时跳过该根。
-fn path_is_within_roots(target_canon: &std::path::Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| {
-        root.canonicalize()
-            .map(|root_canon| target_canon.starts_with(&root_canon))
-            .unwrap_or(false)
-    })
-}
-
-#[cfg(test)]
-mod open_path_scope_tests {
-    use super::path_is_within_roots;
-    use std::path::PathBuf;
-
-    fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("mdm-scope-{tag}-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn allows_paths_inside_a_configured_root() {
-        let root = temp_root("in");
-        let inside = root.join("model.bin");
-        std::fs::write(&inside, b"x").unwrap();
-        let inside_canon = inside.canonicalize().unwrap();
-        assert!(path_is_within_roots(&inside_canon, std::slice::from_ref(&root)));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn rejects_paths_outside_all_roots() {
-        let root = temp_root("root");
-        let other = temp_root("other");
-        let outside = other.join("secret.txt");
-        std::fs::write(&outside, b"x").unwrap();
-        let outside_canon = outside.canonicalize().unwrap();
-        assert!(!path_is_within_roots(&outside_canon, std::slice::from_ref(&root)));
-        let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(&other);
-    }
-
-    #[test]
-    fn rejects_sibling_directory_sharing_a_name_prefix() {
-        // `root` 与 `root-evil` 字符串前缀相同，但不是父子关系，必须拒绝。
-        let root = temp_root("pfx");
-        let evil = PathBuf::from(format!("{}-evil", root.display()));
-        std::fs::create_dir_all(&evil).unwrap();
-        let file = evil.join("x.bin");
-        std::fs::write(&file, b"x").unwrap();
-        let file_canon = file.canonicalize().unwrap();
-        assert!(!path_is_within_roots(&file_canon, std::slice::from_ref(&root)));
-        let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(&evil);
-    }
-
-    #[test]
-    fn unresolvable_root_is_skipped_not_trusted() {
-        let root = temp_root("ok");
-        let file = root.join("a.bin");
-        std::fs::write(&file, b"x").unwrap();
-        let file_canon = file.canonicalize().unwrap();
-        let missing = PathBuf::from("Z:/definitely/not/here/mdm");
-        assert!(path_is_within_roots(&file_canon, &[missing.clone(), root.clone()]));
-        assert!(!path_is_within_roots(&file_canon, std::slice::from_ref(&missing)));
-        let _ = std::fs::remove_dir_all(&root);
-    }
+/// Reveal only the file recorded by the backend for this download.
+#[tauri::command(rename_all = "camelCase")]
+pub fn reveal_download(
+    state: tauri::State<'_, Arc<AppState>>,
+    task_id: String,
+) -> Result<(), String> {
+    let task = state
+        .get_task(&task_id)
+        .ok_or_else(|| "下载任务不存在".to_string())?;
+    let target = crate::library::task_reveal_path(&task)?;
+    util::open_in_explorer(&target, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -388,39 +320,16 @@ fn delete_local_file_impl(
     }
 
     // 只允许删除已配置扫描根（downloadDir ∪ libraryRoots）内的文件，防止前端误删任意路径。
-    ensure_within_scan_roots(state, &target)
-        .map_err(|_| "只能删除已配置扫描根目录内的文件".to_string())?;
+    let target =
+        crate::library::resolve_scan_path(&target, &library_scan_roots(&state.current_settings()))
+            .map_err(|_| "只能删除已配置扫描根目录内的文件".to_string())?;
 
-    let matched: Vec<DownloadTask> = state
-        .tasks_snapshot()
-        .into_iter()
-        .filter(|task| task.save_path == path)
-        .collect();
-    let tasks = state.tasks_snapshot();
-    if let Some(task) = tasks.iter().find(|task| {
-        !task.status.is_terminal() && (task.save_path == path || task.temp_path == path)
-    }) {
-        return Err(format!("任务「{}」尚未结束，请先取消下载", task.file_name));
-    }
-
-    std::fs::remove_file(&target).map_err(|err| format!("删除文件失败：{err}"))?;
-    // 同时清理可能残留的临时文件。删除 `.part` 时，旁路元数据是同名 `.part.json`。
-    let _ = std::fs::remove_file(util::with_suffix(&target, ".part"));
-    let _ = std::fs::remove_file(util::with_suffix(&target, ".part.json"));
-    if path.ends_with(".part") {
-        let _ = std::fs::remove_file(util::with_suffix(&target, ".json"));
-    }
-
-    if remove_task {
-        let task_ids: Vec<String> = matched.iter().map(|task| task.task_id.clone()).collect();
-        let removed = state.remove_tasks(&task_ids);
-        if !removed.is_empty() {
-            for task_id in &removed {
-                state.remove_control(task_id);
-            }
-            util::emit_tasks_removed(sink, &removed);
-            state.mark_dirty(true);
+    let removed = state.delete_library_file(&target, remove_task)?;
+    if !removed.is_empty() {
+        for task_id in &removed {
+            state.remove_control(task_id);
         }
+        util::emit_tasks_removed(sink, &removed);
     }
     Ok(())
 }

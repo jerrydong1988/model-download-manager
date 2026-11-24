@@ -40,3 +40,7 @@ settings.json
 tasks.json
 *.part
 *.part.json
+
+# Local agent rules and npm cache
+.cc-safety-net/
+.npm-cache/

@@ -12,6 +12,36 @@ pub const MAX_DEPTH: usize = 8;
 /// 最多返回文件数（跨所有根合计）。
 pub const MAX_FILES: usize = 20_000;
 
+/// Return the same canonical path that passed the scan-root boundary check.
+pub fn resolve_scan_path(target: &Path, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let target = dunce::canonicalize(target).map_err(|e| format!("无法解析路径：{e}"))?;
+    if roots
+        .iter()
+        .filter_map(|root| dunce::canonicalize(root).ok())
+        .any(|root| target.starts_with(root))
+    {
+        Ok(target)
+    } else {
+        Err("只能打开已配置扫描根目录内的路径".into())
+    }
+}
+
+pub fn task_reveal_path(task: &DownloadTask) -> Result<PathBuf, String> {
+    use crate::models::TaskStatus;
+    let saved = Path::new(&task.save_path);
+    let partial = util::with_suffix(saved, ".part");
+    let path = match task.status {
+        TaskStatus::Completed => saved,
+        TaskStatus::Error if !partial.try_exists().map_err(|e| e.to_string())? => saved,
+        _ => &partial,
+    };
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| format!("无法定位下载文件：{e}"))?;
+    if !path.is_absolute() || !metadata.is_file() {
+        return Err("只能定位下载任务记录的普通文件".into());
+    }
+    dunce::canonicalize(path).map_err(|e| format!("无法解析下载文件：{e}"))
+}
+
 /// 扫描本地模型库（v0.2.0 支持多扫描根）。
 ///
 /// - `roots` 按顺序扫描（调用方保证 downloadDir 在前），同一文件只保留首次出现；
@@ -266,5 +296,73 @@ mod tests {
         assert_eq!(deduped.len(), 1, "同一路径不得重复");
         let _ = std::fs::remove_dir_all(&root_a);
         let _ = std::fs::remove_dir_all(&root_b);
+    }
+
+    #[test]
+    fn allows_paths_inside_a_configured_root() {
+        let root = unique_dir("in");
+        let inside = root.join("model.bin");
+        std::fs::write(&inside, b"x").unwrap();
+        assert!(resolve_scan_path(&inside, std::slice::from_ref(&root)).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_paths_outside_all_roots() {
+        let root = unique_dir("root");
+        let other = unique_dir("other");
+        let outside = other.join("secret.txt");
+        std::fs::write(&outside, b"x").unwrap();
+        assert!(resolve_scan_path(&outside, std::slice::from_ref(&root)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn rejects_sibling_directory_sharing_a_name_prefix() {
+        // `root` 与 `root-evil` 字符串前缀相同，但不是父子关系，必须拒绝。
+        let root = unique_dir("pfx");
+        let evil = PathBuf::from(format!("{}-evil", root.display()));
+        std::fs::create_dir_all(&evil).unwrap();
+        let file = evil.join("x.bin");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(resolve_scan_path(&file, std::slice::from_ref(&root)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&evil);
+    }
+
+    #[test]
+    fn unresolvable_root_is_skipped_not_trusted() {
+        let root = unique_dir("ok");
+        let file = root.join("a.bin");
+        std::fs::write(&file, b"x").unwrap();
+        let missing = root.join("not-created");
+        assert!(resolve_scan_path(&file, &[missing.clone(), root.clone()]).is_ok());
+        assert!(resolve_scan_path(&file, std::slice::from_ref(&missing)).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reveals_only_the_selected_task_file_in_a_custom_directory() {
+        let dir = unique_dir("custom");
+        let path = dir.join("模型, example.gguf");
+        let mut task = sample_task(path.to_str().unwrap());
+        let partial = util::with_suffix(&path, ".part");
+        std::fs::write(&partial, b"a").unwrap();
+        task.status = TaskStatus::Paused;
+        assert_eq!(
+            task_reveal_path(&task).unwrap(),
+            dunce::canonicalize(&partial).unwrap()
+        );
+        std::fs::rename(&partial, &path).unwrap();
+        for status in [TaskStatus::Completed, TaskStatus::Error] {
+            task.status = status;
+            assert_eq!(
+                task_reveal_path(&task).unwrap(),
+                dunce::canonicalize(&path).unwrap()
+            );
+        }
+        assert!(resolve_scan_path(&path, &[]).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

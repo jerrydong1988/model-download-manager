@@ -42,6 +42,7 @@ struct MockRequest {
     range_start: Option<u64>,
     /// `Range: bytes=N-M` 的结束偏移（v0.2.0 分段下载测试使用）。
     range_end: Option<u64>,
+    if_range: Option<String>,
 }
 
 struct MockResponse {
@@ -54,6 +55,7 @@ struct MockResponse {
     /// 分块发送大小与块间延迟（模拟慢速服务器以便测试暂停）。
     chunk_size: Option<usize>,
     chunk_delay: Duration,
+    declare_length: bool,
 }
 
 impl MockResponse {
@@ -66,6 +68,7 @@ impl MockResponse {
             truncate_to: None,
             chunk_size: None,
             chunk_delay: Duration::ZERO,
+            declare_length: true,
         }
     }
 
@@ -74,6 +77,8 @@ impl MockResponse {
     }
 
     fn header(mut self, name: &str, value: &str) -> Self {
+        self.headers
+            .retain(|(key, _)| !key.eq_ignore_ascii_case(name));
         self.headers.push((name.to_string(), value.to_string()));
         self
     }
@@ -134,8 +139,12 @@ where
                 let path = parts.next().unwrap_or("/").to_string();
                 let mut range_start = None;
                 let mut range_end = None;
+                let mut if_range = None;
                 for line in lines {
                     if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("if-range") {
+                            if_range = Some(value.trim().to_string());
+                        }
                         if name.eq_ignore_ascii_case("range") {
                             if let Some(rest) = value.trim().strip_prefix("bytes=") {
                                 let mut bounds = rest.split('-');
@@ -152,6 +161,7 @@ where
                     path,
                     range_start,
                     range_end,
+                    if_range,
                 };
                 let response = handler(index, &request);
 
@@ -166,7 +176,7 @@ where
                         has_length = true;
                     }
                 }
-                if !has_length {
+                if response.declare_length && !has_length {
                     head.extend_from_slice(
                         format!("Content-Length: {}\r\n", response.body.len()).as_bytes(),
                     );
@@ -392,7 +402,7 @@ async fn falls_back_to_full_download_when_server_ignores_range() {
 #[tokio::test]
 async fn does_not_trust_416_for_legacy_full_length_part() {
     let dir = unique_dir("416");
-    seed_legacy_meta(&dir, 0);
+    seed_legacy_meta_with_etag(&dir, 0, "\"v1\"");
     let full = content();
     // part 已完整但任务 total 未知（列表中 size=0），因此仍会发 Range 请求。
     std::fs::write(dir.join("model.safetensors.part"), vec![0; TOTAL]).unwrap();
@@ -735,6 +745,10 @@ impl RecordingSink {
 
 /// 支持任意 Range 的 mock 响应：`Range: bytes=a-b` → `206 + Content-Range`。
 fn range_response(full: &[u8], request: &MockRequest) -> MockResponse {
+    range_body(full, request).header("ETag", "\"v1\"")
+}
+
+fn range_body(full: &[u8], request: &MockRequest) -> MockResponse {
     let total = full.len() as u64;
     match (request.range_start, request.range_end) {
         (Some(start), Some(end)) => {
@@ -878,7 +892,7 @@ async fn segmented_pause_keeps_chunks_and_resume_finishes() {
 #[tokio::test]
 async fn legacy_single_stream_part_is_converted_to_segments() {
     let dir = unique_dir("seg-legacy");
-    seed_legacy_meta(&dir, 0);
+    seed_legacy_meta_with_etag(&dir, 0, "\"v1\"");
     let full = content();
     // 旧单流断点：连续前缀 300 字节，无分段元数据。
     std::fs::write(dir.join("model.safetensors.part"), &full[..300]).unwrap();
@@ -1158,7 +1172,7 @@ async fn audit_stalled_pause(connections: u32) {
             MockResponse::ok(body)
         };
         // A valid response which sends its first byte and then stalls.
-        response.slow(1, 60_000)
+        response.header("ETag", "\"v1\"").slow(1, 60_000)
     })
     .await;
     let dir = unique_dir("audit-stalled");
@@ -1530,4 +1544,238 @@ async fn oversized_partial_response_is_never_published() {
     let save = ctx.save_path.clone();
     assert!(transfer(ctx, &NoopSink).await.is_err());
     assert!(!save.exists());
+}
+
+#[tokio::test]
+async fn explicit_empty_file_completes_without_a_digest() {
+    let dir = unique_dir("empty");
+    let (url, _) = spawn_mock_server(|_, _| MockResponse::ok(Vec::new())).await;
+    let ctx = build_context(&dir, url, TaskControl::new(), 0, 0);
+    assert!(matches!(
+        run_transfer(ctx).await.unwrap(),
+        TransferOutcome::Completed {
+            downloaded: 0,
+            total_size: 0,
+            ..
+        }
+    ));
+    assert_eq!(read_final(&dir), Vec::<u8>::new());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn close_delimited_stream_requires_a_digest() {
+    for has_digest in [false, true] {
+        let dir = unique_dir("unknown-size");
+        let (url, _) = spawn_mock_server(|_, _| {
+            let mut response = MockResponse::ok(b"abc".to_vec());
+            response.declare_length = false;
+            response
+        })
+        .await;
+        let mut ctx = build_context(&dir, url, TaskControl::new(), 0, 0);
+        ctx.sha256_known = has_digest;
+        let partial = ctx.part_path.clone();
+        let saved = ctx.save_path.clone();
+        let result = run_transfer(ctx).await;
+        if has_digest {
+            assert!(matches!(
+                result.unwrap(),
+                TransferOutcome::Completed { downloaded: 3, .. }
+            ));
+            assert_eq!(read_final(&dir), b"abc");
+        } else {
+            assert!(result.unwrap_err().contains("SHA-256"));
+            assert!(!saved.exists());
+            assert_eq!(std::fs::read(&partial).unwrap(), b"abc");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn unversioned_and_weak_checkpoints_restart_in_both_engines() {
+    for connections in [1, 4] {
+        for tag in [None, Some("W/\"v1\"")] {
+            let dir = unique_dir("unversioned");
+            let (url, calls) = spawn_mock_server(move |_, request| {
+                assert!(request.if_range.is_none());
+                // Only the multi-connection capability probe may request a range.
+                if let Some(start) = request.range_start {
+                    assert_eq!((start, request.range_end), (0, Some(0)));
+                }
+                let response = range_body(&content(), request);
+                match tag {
+                    Some(value) => response.header("ETag", value),
+                    None => response,
+                }
+            })
+            .await;
+            if let Some(value) = tag {
+                seed_legacy_meta_with_etag(&dir, TOTAL as u64, value);
+            } else {
+                seed_legacy_meta(&dir, TOTAL as u64);
+            }
+            let ctx = build_auto_context(
+                &dir,
+                url,
+                TaskControl::new(),
+                TOTAL as u64,
+                connections,
+                Some(128),
+                0,
+            );
+            std::fs::write(&ctx.part_path, [0; 300]).unwrap();
+            assert!(matches!(
+                run_transfer_auto(ctx).await.unwrap(),
+                TransferOutcome::Completed { .. }
+            ));
+            assert_eq!(read_final(&dir), content());
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                if connections == 1 { 1 } else { 2 }
+            );
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn missing_chunk_identity_falls_back_to_one_full_response() {
+    let dir = unique_dir("chunk-fallback");
+    let (url, _) = spawn_mock_server(|_, req| {
+        if req.range_end == Some(0) {
+            return range_response(&content(), req);
+        }
+        range_body(&content(), req)
+    })
+    .await;
+    let ctx = build_auto_context(&dir, url, TaskControl::new(), TOTAL as u64, 4, Some(128), 0);
+    assert!(matches!(
+        run_transfer_auto(ctx).await.unwrap(),
+        TransferOutcome::Completed { .. }
+    ));
+    assert_eq!(read_final(&dir), content());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn http_date_only_resumes_when_the_checkpoint_proves_its_strength() {
+    const MODIFIED: &str = "Wed, 21 Oct 2015 07:28:00 GMT";
+    for qualified in [false, true] {
+        let dir = unique_dir("date-validator");
+        let (url, _) = spawn_mock_server(move |_, req| {
+            let full = content();
+            let response = if qualified {
+                assert_eq!(req.if_range.as_deref(), Some(MODIFIED));
+                assert_eq!(req.range_start, Some(300));
+                MockResponse::new(206, "Partial Content", full[300..].to_vec())
+                    .header("Content-Range", &format!("bytes 300-{}/{TOTAL}", TOTAL - 1))
+            } else {
+                assert!(req.range_start.is_none() && req.if_range.is_none());
+                MockResponse::ok(full)
+            };
+            response
+                .header("Last-Modified", MODIFIED)
+                .header("Date", "Wed, 21 Oct 2015 07:35:00 GMT")
+        })
+        .await;
+        let ctx = build_context(&dir, url, TaskControl::new(), TOTAL as u64, 0);
+        util::atomic_write_json(
+            &ctx.meta_path,
+            &serde_json::json!({
+                "repoId": "org/model", "remotePath": "model.safetensors", "total": TOTAL,
+                "lastModified": MODIFIED, "strongLastModified": qualified
+            }),
+        )
+        .unwrap();
+        std::fs::write(&ctx.part_path, &content()[..300]).unwrap();
+        assert!(matches!(
+            run_transfer(ctx).await.unwrap(),
+            TransferOutcome::Completed { .. }
+        ));
+        assert_eq!(read_final(&dir), content());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn locked_partial_stops_reset_and_preserves_its_identity() {
+    use std::os::windows::fs::OpenOptionsExt;
+    for connections in [1, 4] {
+        let dir = unique_dir("locked-reset");
+        let (url, _) = spawn_mock_server(|_, req| {
+            let mut response = range_response(&content(), req).header("ETag", "\"new\"");
+            if req.range_start == Some(300) {
+                response = MockResponse::new(206, "Partial Content", content()[300..].to_vec())
+                    .header("Content-Range", &format!("bytes 300-{}/{TOTAL}", TOTAL - 1))
+                    .header("ETag", "\"new\"");
+            }
+            response
+        })
+        .await;
+        let ctx = build_auto_context(
+            &dir,
+            url,
+            TaskControl::new(),
+            TOTAL as u64,
+            connections,
+            Some(128),
+            0,
+        );
+        seed_legacy_meta_with_etag(&dir, TOTAL as u64, "\"old\"");
+        std::fs::write(&ctx.part_path, &content()[..300]).unwrap();
+        let guard = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&ctx.part_path)
+            .unwrap();
+        let meta = ctx.meta_path.clone();
+        let saved = ctx.save_path.clone();
+        let result = run_transfer_auto(ctx).await.unwrap_err();
+        assert!(result.contains("清理"), "{result}");
+        assert!(!saved.exists());
+        let old: serde_json::Value = util::read_json_opt(&meta).unwrap();
+        assert_eq!(old["etag"], "\"old\"");
+        drop(guard);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn persisted_segments_without_proven_identity_refetch_the_first_chunk() {
+    let dir = unique_dir("unproven-segments");
+    let (url, _) = spawn_mock_server(|_, req| range_response(&content(), req)).await;
+    let ctx = build_auto_context(&dir, url, TaskControl::new(), TOTAL as u64, 4, Some(250), 0);
+    std::fs::write(&ctx.part_path, vec![0; TOTAL]).unwrap();
+    util::atomic_write_json(
+        &ctx.meta_path,
+        &serde_json::json!({
+            "repoId":"org/model","remotePath":"model.safetensors","total":TOTAL,
+            "chunkSize":250,"chunks":[250,0,0,0]
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        run_transfer_auto(ctx).await.unwrap(),
+        TransferOutcome::Completed { .. }
+    ));
+    assert_eq!(read_final(&dir), content());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn wrong_offset_in_a_200_range_body_is_not_a_full_file() {
+    let dir = unique_dir("partial-200");
+    let (url, _) = spawn_mock_server(|_, _| {
+        MockResponse::ok(content()[200..].to_vec())
+            .header("Content-Range", &format!("bytes 200-{}/{TOTAL}", TOTAL - 1))
+    })
+    .await;
+    let ctx = build_context(&dir, url, TaskControl::new(), 0, 0);
+    let path = ctx.save_path.clone();
+    assert!(run_transfer(ctx).await.is_err());
+    assert!(!path.exists());
+    std::fs::remove_dir_all(dir).unwrap();
 }

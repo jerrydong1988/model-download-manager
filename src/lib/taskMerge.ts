@@ -14,6 +14,12 @@
  */
 import type { DownloadProgressEvent, DownloadTask, TaskStatus } from '../types'
 
+/** Wait for the digest result before announcing a successful download. */
+export function justCompleted(previous: DownloadTask | undefined, task: DownloadTask): boolean {
+  return previous !== undefined && task.status === 'completed' && task.verifyStatus !== 'pending'
+    && (previous.status !== 'completed' || previous.verifyStatus === 'pending')
+}
+
 /** 是否为「过期快照导致的非法状态回退」，需要丢弃 incoming.status。 */
 export function isStaleStatusRegression(previous: TaskStatus, incoming: TaskStatus): boolean {
   if (previous === incoming) return false
@@ -32,6 +38,10 @@ export function mergeTask(previous: DownloadTask, incoming: DownloadTask): Downl
     // cleared values (for example error after retry), not retained old fields.
     return incoming
   }
+  // Older snapshots lack sequence numbers. Digest verification may follow file transfer.
+  if (previous.status === 'completed' && previous.verifyStatus === 'pending' && incoming.status === 'error') return incoming
+  if (previous.status === 'completed' && previous.verifyStatus === 'verified'
+    && incoming.status === 'completed' && incoming.verifyStatus === 'pending') return previous
   const status = isStaleStatusRegression(previous.status, incoming.status)
     ? previous.status
     : incoming.status

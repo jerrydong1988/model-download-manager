@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyProgressToTask,
   isStaleStatusRegression,
+  justCompleted,
   mergeTask,
   mergeTaskLists,
 } from '../../src/lib/taskMerge.ts'
@@ -142,4 +143,18 @@ test('applyProgressToTask：active 任务进度不回退', () => {
   })
   assert.equal(next.downloaded, 5_000_000)
   assert.equal(next.speed, 8_000_000)
+})
+
+test('有摘要的下载只在校验通过后报告一次完成', () => {
+  const active = makeTask({ status: 'active' })
+  const pending = makeTask({ status: 'completed', verifyStatus: 'pending' })
+  const verified = makeTask({ status: 'completed', verifyStatus: 'verified' })
+  const mismatch = makeTask({ status: 'error', verifyStatus: 'mismatch' })
+  assert.equal(mergeTask(pending, mismatch).status, 'error')
+  assert.equal(mergeTask(verified, pending).verifyStatus, 'verified')
+  assert.equal(justCompleted(active, pending), false)
+  assert.equal(justCompleted(pending, verified), true)
+  assert.equal(justCompleted(verified, verified), false)
+  assert.equal(justCompleted(pending, makeTask({ status: 'error', verifyStatus: 'mismatch' })), false)
+  assert.equal(justCompleted(active, makeTask({ status: 'completed', verifyStatus: 'unavailable' })), true)
 })

@@ -119,7 +119,7 @@ function initialPage(): PageKey {
 /* ------------------------------------------------------------------ */
 // 合并 / 状态防回退 / 进度自愈逻辑抽到纯函数模块（可 Node 单元测试）：
 // src/lib/taskMerge.ts；线上 v0.1.3 的「active 被过期 queued 响应覆盖」问题即在此修复。
-import { applyProgressToTask, mergeTaskLists, reconcileTaskSnapshot, type SnapshotMutation } from '../lib/taskMerge'
+import { applyProgressToTask, justCompleted, mergeTaskLists, reconcileTaskSnapshot, type SnapshotMutation } from '../lib/taskMerge'
 
 let snapshotJournal: SnapshotMutation[] | null = null
 let snapshotSettings: Settings | null = null
@@ -213,11 +213,6 @@ let announceLastAt = 0
 let announceCompleted = 0
 let announceFailed = 0
 
-function isCompletion(from: TaskStatus | undefined, to: TaskStatus): boolean {
-  if (to !== 'completed') return false
-  return from !== undefined && from !== 'completed'
-}
-
 function isFailure(from: TaskStatus | undefined, to: TaskStatus): boolean {
   if (to !== 'error') return false
   return from !== undefined && from !== 'error'
@@ -230,8 +225,8 @@ function shortFileNames(tasks: DownloadTask[], max = 3): string {
 }
 
 function openTaskLocation(task: DownloadTask): void {
-  const target = task.status === 'completed' ? task.savePath : task.tempPath
-  void ipc.openPath(target, true).catch((error: unknown) => {
+
+  void ipc.revealDownload(task.taskId).catch((error: unknown) => {
     useAppStore.getState().pushToast('error', '无法打开所在位置', toErrorText(error))
   })
 }
@@ -332,9 +327,9 @@ function collectTransitions(
   if (incoming.length === 0) return result
   const before = new Map(previous.map((task) => [task.taskId, task]))
   for (const task of incoming) {
-    const from = before.get(task.taskId)?.status
-    if (isCompletion(from, task.status)) result.completed.push(task)
-    else if (isFailure(from, task.status)) result.failed.push(task)
+    const from = before.get(task.taskId)
+    if (justCompleted(from, task)) result.completed.push(task)
+    else if (isFailure(from?.status, task.status)) result.failed.push(task)
   }
   return result
 }

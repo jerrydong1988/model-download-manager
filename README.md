@@ -90,7 +90,7 @@ cd src-tauri; cargo test # 后端单元 + 本地 HTTP 集成回归（CI 运行�
 ```powershell
 npm run tauri:build
 # 免安装可执行文件：src-tauri\target\release\model-download-manager.exe
-# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.2_x64-setup.exe
+# NSIS 安装包：src-tauri\target\release\bundle\nsis\Model Download Manager_0.5.3_x64-setup.exe
 ```
 
 正式发布须配置 minisign 签名密钥。CI 会验证安装包签名、版本和 `latest.json`，检查通过才发布。开发分支可构建无签名测试包。

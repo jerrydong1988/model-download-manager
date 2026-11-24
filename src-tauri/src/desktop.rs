@@ -120,6 +120,7 @@ pub fn run() {
             commands::scan_library,
             commands::list_partials,
             commands::open_path,
+            commands::reveal_download,
             commands::delete_local_file,
             commands::test_connection,
             commands::list_revisions,

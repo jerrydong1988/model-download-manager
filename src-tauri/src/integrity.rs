@@ -159,6 +159,9 @@ impl DigestCache {
     }
 
     fn cached(&self, key: &str, stamp: &FileStamp) -> Option<String> {
+        if !stamp.cacheable() {
+            return None;
+        }
         let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let cached = entries.get(key)?;
         (&cached.stamp == stamp).then(|| cached.sha256.clone())
@@ -174,21 +177,22 @@ impl DigestCache {
         let _reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
         let file = File::open(path).map_err(|e| format!("无法读取文件以校验：{e}"))?;
         let key = util::task_path_key(path);
-        let before = FileStamp::read(&file);
-        if let Some(digest) = before.as_ref().and_then(|stamp| self.cached(&key, stamp)) {
+        let before =
+            FileStamp::read(&file).ok_or_else(|| "无法获取文件信息，请刷新后重试".to_string())?;
+        if let Some(digest) = self.cached(&key, &before) {
             return Ok(digest);
         }
         let digest = hash_reader(&file)?;
         let after = File::open(path).map_err(|e| e.to_string())?;
-        if before != FileStamp::read(&after) {
+        if FileStamp::read(&after).as_ref() != Some(&before) {
             return Err("校验期间文件发生变化，请刷新后重试".into());
         }
-        if let Some(stamp) = before.filter(FileStamp::cacheable) {
+        if before.cacheable() {
             let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
             entries.insert(
                 key,
                 CachedDigest {
-                    stamp,
+                    stamp: before,
                     sha256: digest.clone(),
                 },
             );
@@ -290,5 +294,29 @@ mod tests {
         assert_eq!(reopened.lookup(&path), None);
         assert_ne!(reopened.digest(&path).unwrap(), digest);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_file_identity_never_authorizes_a_cached_digest() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("fixture");
+        std::fs::write(&path, b"abc").unwrap();
+        let make_stamp = || {
+            let mut stamp = FileStamp::read(&File::open(&path).unwrap()).unwrap();
+            stamp.identity = None;
+            stamp
+        };
+        let cache = DigestCache::open(&dir);
+        cache.entries.lock().unwrap().insert(
+            "fixture".into(),
+            CachedDigest {
+                stamp: make_stamp(),
+                sha256: "0".repeat(64),
+            },
+        );
+        assert_eq!(cache.cached("fixture", &make_stamp()), None);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

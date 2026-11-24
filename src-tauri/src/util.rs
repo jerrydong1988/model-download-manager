@@ -736,7 +736,8 @@ pub fn open_in_explorer(path: &Path, reveal: bool) -> Result<(), String> {
     {
         let mut command = std::process::Command::new("explorer");
         if reveal && path.is_file() {
-            command.arg(format!("/select,{}", path.display()));
+            // explorer 对 /select, 的解析不遵循标准 argv 规则，路径需整体加引号。
+            command.arg(format!("/select,\"{}\"", path.display()));
         } else {
             command.arg(path.as_os_str());
         }
